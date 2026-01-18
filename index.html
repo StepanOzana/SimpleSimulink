@@ -1,0 +1,664 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Simulink-lite (Plain HTML) - Drawflow</title>
+
+  <!-- Drawflow (local). Make sure these files exist in ./static/ -->
+  <link rel="stylesheet" href="/static/drawflow.min.css">
+  <script src="/static/drawflow.min.js"></script>
+  <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
+
+  <style>
+    body { margin: 0; font-family: Arial, sans-serif; }
+    .layout { display: grid; grid-template-columns: 260px 1fr 320px; height: 100vh; }
+    .panel { border-right: 1px solid #ddd; padding: 12px; overflow: auto; }
+    #drawflow { width: 100%; height: 100%; background: #f6f7f9; }
+    .toolbar button { width: 100%; margin: 6px 0; padding: 10px; cursor: pointer; }
+    .blockbtn { text-align: left; }
+    .kv { display: grid; grid-template-columns: 110px 1fr; gap: 8px; margin: 8px 0; }
+    .kv label { font-size: 12px; color: #555; }
+    input[type="number"], input[type="text"] { width: 100%; padding: 6px; }
+    pre { white-space: pre-wrap; word-break: break-word; background:#111; color:#ddd; padding:10px; border-radius:8px; }
+    .hint { font-size: 12px; color:#666; line-height: 1.4; }
+
+    /* Simple node styling */
+    .df-node { border-radius: 10px; }
+    .node-title { font-weight: bold; margin-bottom: 6px; }
+    .node-type { font-size: 12px; color: #666; }
+    .node-params { font-size: 12px; color: #333; margin-top: 8px; }
+  </style>
+</head>
+<body>
+<div class="layout">
+  <!-- Left panel -->
+  <div class="panel">
+    <h3>Blocks</h3>
+    <div class="toolbar">
+      <button class="blockbtn" onclick="addBlock('Constant')">+ Constant</button>
+      <button class="blockbtn" onclick="addBlock('Gain')">+ Gain</button>
+      <button class="blockbtn" onclick="addBlock('Sum')">+ Sum (u1,u2)</button>
+      <button class="blockbtn" onclick="addBlock('Integrator')">+ Integrator</button>
+      <button class="blockbtn" onclick="addBlock('Plot')">+ Plot</button>
+      <button class="blockbtn" onclick="addBlock('TransferFunction')">+ Transfer Function</button>
+    </div>
+
+    <hr>
+    <h3>Run</h3>
+    <div class="kv">
+      <label>t0</label><input id="t0" type="number" value="0" step="0.1">
+      <label>t1</label><input id="t1" type="number" value="5" step="0.1">
+      <label>dt</label><input id="dt" type="number" value="0.1" step="0.01">
+    </div>
+
+    <button onclick="exportGraph()">Export JSON</button>
+    <button onclick="simulate()">Simulate</button>
+
+    <p class="hint">
+      Tip: Klikni na blok pro editaci parametrů vpravo. Propoj porty tažením z výstupu do vstupu.
+      <br><br>
+      MVP pravidla: 1 drát na 1 vstup. Žádné čistě algebraické cykly.
+    </p>
+  </div>
+
+  <!-- Canvas -->
+  <div id="drawflow" class="drawflow"></div>
+
+  <!-- Right panel -->
+  <div class="panel">
+    <h3>Selected block</h3>
+    <div id="selectedInfo" class="hint">Nothing selected.</div>
+    <div id="paramEditor"></div>
+
+    <hr>
+    <h3>Output</h3>
+    <div id="jsStatus" class="hint">JS not started yet.</div>
+    <div id="plot" style="height:320px;"></div>
+    <div id="out" class="hint">—</div>
+    <h4>Last exported JSON</h4>
+    <pre id="jsonOut">{}</pre>
+  </div>
+</div>
+
+<script>
+window.addEventListener("DOMContentLoaded", () => {
+  const jsStatusEl = document.getElementById("jsStatus");
+  const setStatus = (t) => { if (jsStatusEl) jsStatusEl.textContent = t; };
+
+  window.onerror = function(msg, url, line, col, err) {
+    setStatus("JS ERROR: " + msg + " (line " + line + ")");
+  };
+
+  if (typeof Drawflow === "undefined") {
+    setStatus("Drawflow is NOT defined. Check /static/drawflow.min.js");
+    return;
+  }
+
+  setStatus("JS started. Initializing editor...");
+
+  // ---- Block library: ports + default params ----
+  const BLOCK_LIBRARY = {
+    Constant:   { inputs: [], outputs: ["y"], defaultParams: { value: 1.0 } },
+    Gain:       { inputs: ["u"], outputs: ["y"], defaultParams: { k: 1.0 } },
+    Sum:        { inputs: ["u1","u2"], outputs: ["y"], defaultParams: {} },
+    Integrator: { inputs: ["u"], outputs: ["y"], defaultParams: { x0: 0.0 } },
+    Plot:       { inputs: ["u"], outputs: [], defaultParams: { label: "" } },
+    TransferFunction: { inputs: ["u"], outputs: ["y"], defaultParams: { num: "1", den: "1,1" } },
+  };
+
+  // ---- Create Drawflow editor ----
+  const container = document.getElementById("drawflow");
+  const editor = new Drawflow(container);
+  editor.reroute = true;
+  editor.start();
+  editor.editor_mode = "edit";
+
+  setStatus("Editor started.");
+
+  let selectedNodeId = null;
+
+  function nodeHtml(type, params) {
+    const p = JSON.stringify(params);
+    return `
+      <div>
+        <div class="node-title">${type}</div>
+        <div class="node-type">ports from library</div>
+        <div class="node-params"><b>params</b>: ${p}</div>
+      </div>
+    `;
+  }
+
+  // Expose addBlock/exportGraph/simulate globally for onclick handlers
+  window.addBlock = function addBlock(type) {
+    const spec = BLOCK_LIBRARY[type];
+    if (!spec) return alert("Unknown type: " + type);
+
+    const params = JSON.parse(JSON.stringify(spec.defaultParams)); // deep copy
+    const data = { blockType: type, params };
+
+    const inputsCount = spec.inputs.length;
+    const outputsCount = spec.outputs.length;
+
+    const x = 300 + Math.random() * 200;
+    const y = 60 + Math.random() * 200;
+
+    editor.addNode(
+      type,
+      inputsCount,
+      outputsCount,
+      x, y,
+      type,
+      data,
+      nodeHtml(type, params)
+    );
+  };
+
+  editor.on("nodeSelected", function(id) {
+    selectedNodeId = id;
+    renderParamEditor();
+  });
+
+  editor.on("nodeUnselected", function() {
+    selectedNodeId = null;
+    renderParamEditor();
+  });
+
+  function refreshNodeHtml(id) {
+    const n = editor.getNodeFromId(id);
+    const type = n.name;
+    const params = n.data?.params || {};
+    editor.updateNodeDataFromId(id, n.data);
+    const el = document.querySelector(`#node-${id} .drawflow_content_node`);
+    if (el) el.innerHTML = nodeHtml(type, params);
+  }
+
+  function renderParamEditor() {
+    const info = document.getElementById("selectedInfo");
+    const pe = document.getElementById("paramEditor");
+    pe.innerHTML = "";
+
+    if (!selectedNodeId) {
+      info.textContent = "Nothing selected.";
+      return;
+    }
+    const node = editor.getNodeFromId(selectedNodeId);
+    const type = node.name;
+    const spec = BLOCK_LIBRARY[type];
+    const params = node.data.params || {};
+
+    info.innerHTML = `<div><b>ID:</b> ${selectedNodeId} <br><b>Type:</b> ${type}</div>`;
+
+    const defaults = spec.defaultParams || {};
+    const keys = Object.keys(defaults);
+
+    if (keys.length === 0) {
+      pe.innerHTML = `<div class="hint">No params for this block.</div>`;
+      return;
+    }
+
+    keys.forEach(k => {
+      const row = document.createElement("div");
+      row.className = "kv";
+      const lab = document.createElement("label");
+      lab.textContent = k;
+
+      const inp = document.createElement("input");
+      const defv = defaults[k];
+      const isNum = (typeof defv === "number");
+      inp.type = isNum ? "number" : "text";
+      if (isNum) inp.step = "any";
+      inp.value = (params[k] !== undefined) ? params[k] : defv;
+
+const nodeId = selectedNodeId; // capture at render time (selection may change when focusing input)
+
+const commit = () => {
+  if (!nodeId) return;
+
+  const nodeNow = editor.getNodeFromId(nodeId);
+  if (!nodeNow) return;
+
+  let newVal;
+  if (isNum) {
+    const v = parseFloat(inp.value);
+    newVal = Number.isFinite(v) ? v : defv;
+  } else {
+    newVal = inp.value;
+  }
+
+  const newData = {
+    ...(nodeNow.data || {}),
+    params: {
+      ...((nodeNow.data && nodeNow.data.params) ? nodeNow.data.params : {}),
+      [k]: newVal
+    }
+  };
+
+  editor.updateNodeDataFromId(nodeId, newData);
+  refreshNodeHtml(nodeId);
+};
+
+inp.addEventListener("focus", () => { try { inp.select(); } catch(e){} });
+
+// Commit while typing
+inp.addEventListener("input", commit);
+
+// Commit on blur (click elsewhere)
+inp.addEventListener("change", commit);
+
+// Commit on Enter
+inp.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    commit();
+    inp.blur(); // visual feedback: leave edit mode
+  }
+});
+
+      row.appendChild(lab);
+      row.appendChild(inp);
+      pe.appendChild(row);
+    });
+  }
+
+  window.exportGraph = function exportGraph() {
+    const df = editor.export();
+    const nodesObj = df.drawflow.Home.data;
+
+    // Separate "simulation" nodes from UI-only nodes (Plot)
+    const simNodeIds = new Set();
+    const plotNodeIds = new Set();
+    for (const [nid, node] of Object.entries(nodesObj)) {
+      if (node.name === "Plot") plotNodeIds.add(String(nid));
+      else simNodeIds.add(String(nid));
+    }
+    const plotSignals = []; // {block, port, label}
+
+
+    const blocks = [];
+    const wires = [];
+
+    for (const [nid, node] of Object.entries(nodesObj)) {
+      if (node.name === "Plot") continue;
+      const type = node.name;
+      const params = node.data?.params || {};
+      blocks.push({
+        id: String(nid),
+        type,
+        params,
+        ui: { x: node.pos_x, y: node.pos_y }
+      });
+    }
+
+    
+// Build wires by scanning INPUT connections (robust)
+for (const [dstIdRaw, dstNode] of Object.entries(nodesObj)) {
+  const dstId = String(dstIdRaw);
+  const dstType = dstNode.name;
+  const dstSpec = BLOCK_LIBRARY[dstType];
+  if (!dstSpec) continue;
+  if (dstType === "Plot") continue;
+
+  const inputs = dstNode.inputs || {};
+  for (const [inKey, inVal] of Object.entries(inputs)) {
+    const mi = String(inKey || "").match(/input_(\d+)/);
+    if (!mi) continue;
+
+    const inIndex = parseInt(mi[1], 10) - 1;
+    const inPortName = dstSpec.inputs[inIndex];
+    if (!inPortName) continue;
+
+    const conns = (inVal && inVal.connections) ? inVal.connections : [];
+    for (const c of conns) {
+      const srcId = String(c.node);
+      const srcNode = nodesObj[srcId];
+      if (!srcNode) continue;
+      if (srcNode.name === "Plot") continue;
+
+      const srcSpec = BLOCK_LIBRARY[srcNode.name];
+      if (!srcSpec) continue;
+
+      const outStr =
+        (typeof c.output === "string") ? c.output :
+        (typeof c.output_id === "string") ? c.output_id :
+        "output_1";
+
+      const mo = String(outStr).match(/output_(\d+)/);
+      if (!mo) continue;
+
+      const outIndex = parseInt(mo[1], 10) - 1;
+      const outPortName = srcSpec.outputs[outIndex];
+      if (!outPortName) continue;
+
+      wires.push({
+        from: { block: srcId, port: outPortName },
+        to:   { block: dstId, port: inPortName }
+      });
+    }
+  }
+}
+
+
+// --- Expand TransferFunction blocks into primitives (export-time macro) ---
+function parseCoeffList(s) {
+  return String(s || "")
+    .split(",")
+    .map(x => x.trim())
+    .filter(x => x.length)
+    .map(Number);
+}
+
+function makeIdFactory(existing) {
+  let c = 1;
+  return (prefix) => {
+    while (existing.has(prefix + c)) c++;
+    const id = prefix + c;
+    existing.add(id);
+    return id;
+  };
+}
+
+function sumMany(signals) {
+  if (signals.length === 0) throw new Error("sumMany: empty");
+  if (signals.length === 1) return signals[0];
+
+  let acc = signals[0];
+  for (let i = 1; i < signals.length; i++) {
+    const sid = makeBlock("Sum", {});
+    makeWire(acc, { block: sid, port: "u1" });
+    makeWire(signals[i], { block: sid, port: "u2" });
+    acc = { block: sid, port: "y" };
+  }
+  return acc;
+}
+
+// Build quick lookup for block types by id (current blocks array)
+const typeById = new Map(blocks.map(b => [String(b.id), b.type]));
+const tfBlocks = blocks.filter(b => b.type === "TransferFunction");
+
+// Map TF id -> internal output signal {block,port}
+const tfOutSignal = new Map();
+
+if (tfBlocks.length) {
+  const usedIds = new Set(blocks.map(b => String(b.id)));
+  const newId = makeIdFactory(usedIds);
+
+  // helper to create blocks and wires (updates lookup maps)
+  function makeBlock(type, params) {
+    const id = newId("tf_");
+    blocks.push({ id, type, params: params || {}, ui: { x: 0, y: 0 } });
+    typeById.set(String(id), type);
+    return String(id);
+  }
+  function makeWire(fromSig, toSig) {
+    wires.push({
+      from: { block: String(fromSig.block), port: fromSig.port },
+      to:   { block: String(toSig.block), port: toSig.port }
+    });
+  }
+
+  // Gather TF input and output wiring from current wires
+  const tfIn = new Map();   // tfId -> {block,port}
+  const tfOut = new Map();  // tfId -> array of {block,port}
+
+  for (const w of wires) {
+    const toId = String(w.to.block);
+    const fromId = String(w.from.block);
+
+    if (typeById.get(toId) === "TransferFunction" && w.to.port === "u") {
+      tfIn.set(toId, { block: String(w.from.block), port: w.from.port });
+    }
+    if (typeById.get(fromId) === "TransferFunction" && w.from.port === "y") {
+      if (!tfOut.has(fromId)) tfOut.set(fromId, []);
+      tfOut.get(fromId).push({ block: String(w.to.block), port: w.to.port });
+    }
+  }
+
+  // Remove all TF-related wires (we will replace them)
+  for (let i = wires.length - 1; i >= 0; i--) {
+    const w = wires[i];
+    if (typeById.get(String(w.from.block)) === "TransferFunction" ||
+        typeById.get(String(w.to.block)) === "TransferFunction") {
+      wires.splice(i, 1);
+    }
+  }
+
+  // Remove TF blocks from blocks list
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    if (blocks[i].type === "TransferFunction") {
+      typeById.delete(String(blocks[i].id));
+      blocks.splice(i, 1);
+    }
+  }
+
+  // Expand each TF into integrators/gains/sums (controllable canonical form)
+  for (const tf of tfBlocks) {
+    const tfId = String(tf.id);
+    const uSig = tfIn.get(tfId);
+    if (!uSig) throw new Error(`TransferFunction ${tfId}: input u is not connected`);
+
+    const outDests = tfOut.get(tfId) || [];
+
+    const num = parseCoeffList(tf.params?.num);
+    const den = parseCoeffList(tf.params?.den);
+
+    if (den.length < 2) throw new Error(`TransferFunction ${tfId}: den must have order >= 1 (e.g. "1,1")`);
+    if (num.length < 1) throw new Error(`TransferFunction ${tfId}: num must have at least 1 coeff`);
+    if (!Number.isFinite(den[0]) || den[0] === 0) throw new Error(`TransferFunction ${tfId}: den[0] must be nonzero`);
+
+    // Normalize to monic den[0] == 1
+    const d0 = den[0];
+    const denN = den.map(x => x / d0); // [1, a1..an]
+    const numN = num.map(x => x / d0);
+
+    const n = denN.length - 1; // order
+    if (numN.length > n + 1) throw new Error(`TransferFunction ${tfId}: numerator degree must be <= denominator degree`);
+
+    // Pad numerator to length n+1 (highest power first)
+    const padCount = (n + 1) - numN.length;
+    const b = (padCount > 0 ? Array(padCount).fill(0).concat(numN) : numN.slice()); // [b0..bn]
+    const a = denN.slice(1); // [a1..an], length n
+
+    const b0 = b[0];
+    const D = b0;
+
+    // C aligned with states x1..xn:
+    // C_i = b_{n+1-i} - a_{n+1-i}*b0  (i=1..n)
+    const C = [];
+    for (let i0 = 0; i0 < n; i0++) {
+      const bi = b[n - i0];          // b_n, b_{n-1}, ..., b_1
+      const ai = a[n - 1 - i0];      // a_n, a_{n-1}, ..., a_1
+      C.push(bi - ai * b0);
+    }
+
+    // Create n integrators for x1..xn
+    const xIds = [];
+    for (let i0 = 0; i0 < n; i0++) {
+      xIds.push(makeBlock("Integrator", { x0: 0.0 }));
+    }
+
+    // Chain xdot_i = x_{i+1}
+    for (let i0 = 0; i0 < n - 1; i0++) {
+      makeWire({ block: xIds[i0 + 1], port: "y" }, { block: xIds[i0], port: "u" });
+    }
+
+    // xdot_n = u + sum_j (-a_{n-j+1} * x_j)
+    const lastTerms = [];
+    lastTerms.push({ block: uSig.block, port: uSig.port });
+
+    for (let j0 = 0; j0 < n; j0++) {
+      const coeff = -a[n - 1 - j0]; // [-a_n .. -a_1] aligned with x1..xn
+      if (!Number.isFinite(coeff) || coeff === 0) continue;
+      const gid = makeBlock("Gain", { k: coeff });
+      makeWire({ block: xIds[j0], port: "y" }, { block: gid, port: "u" });
+      lastTerms.push({ block: gid, port: "y" });
+    }
+
+    const xdotnSig = sumMany(lastTerms);
+    makeWire(xdotnSig, { block: xIds[n - 1], port: "u" });
+
+    // y = D*u + sum_i(C_i * x_i)
+    const yTerms = [];
+    if (Number.isFinite(D) && D !== 0) {
+      const gd = makeBlock("Gain", { k: D });
+      makeWire({ block: uSig.block, port: uSig.port }, { block: gd, port: "u" });
+      yTerms.push({ block: gd, port: "y" });
+    }
+
+    for (let i0 = 0; i0 < n; i0++) {
+      const coeff = C[i0];
+      if (!Number.isFinite(coeff) || coeff === 0) continue;
+      const gid = makeBlock("Gain", { k: coeff });
+      makeWire({ block: xIds[i0], port: "y" }, { block: gid, port: "u" });
+      yTerms.push({ block: gid, port: "y" });
+    }
+
+    let ySig;
+    if (yTerms.length === 0) {
+      const z = makeBlock("Constant", { value: 0.0 });
+      ySig = { block: z, port: "y" };
+    } else {
+      ySig = sumMany(yTerms);
+    }
+
+    tfOutSignal.set(tfId, ySig);
+
+    // Rewire destinations that previously connected to TF.y
+    for (const d of outDests) {
+      makeWire(ySig, d);
+    }
+  }
+}
+
+    // Extract plot signals from Plot nodes (their input connections)
+    for (const pid of plotNodeIds) {
+      const pnode = nodesObj[pid];
+      const label = (pnode.data && pnode.data.params && typeof pnode.data.params.label === "string") ? pnode.data.params.label : "";
+      const inputs = pnode.inputs || {};
+      const in1 = inputs["input_1"];
+      const conns = in1 ? (in1.connections || []) : [];
+      if (conns.length === 1) {
+        const c = conns[0];
+        const srcId = String(c.node);
+        if (!nodesObj[srcId]) continue;
+        const srcNode = nodesObj[srcId];
+        const srcSpec = BLOCK_LIBRARY[srcNode.name];
+        if (!srcSpec) continue;
+                const outStr = (typeof c.output === "string") ? c.output : (typeof c.output_id === "string" ? c.output_id : "");
+        const m = outStr.match(/output_(\d+)/);
+        if (!m) continue;
+        const outIndex = parseInt(m[1], 10) - 1;
+
+        const outPortName = srcSpec.outputs[outIndex];
+        let sig = { block: srcId, port: outPortName };
+if (tfOutSignal && tfOutSignal.has(srcId)) {
+  sig = tfOutSignal.get(srcId);
+}
+plotSignals.push({ block: String(sig.block), port: sig.port, label: label || (String(sig.block) + "." + sig.port) });
+      }
+    }
+
+    const scopes = [{
+      signals: (plotSignals.length ? plotSignals.map(s => ({ block: s.block, port: s.port }))
+                               : blocks.filter(b => b.type === "Integrator").map(b => ({ block: b.id, port: "y" })))
+    }];
+
+    const graph = { blocks, wires, scopes };
+    document.getElementById("jsonOut").textContent = JSON.stringify(graph, null, 2);
+    return graph;
+  };
+
+  window.simulate = async function simulate() {
+    const graph = window.exportGraph();
+    const t0 = parseFloat(document.getElementById("t0").value);
+    const t1 = parseFloat(document.getElementById("t1").value);
+    const dt = parseFloat(document.getElementById("dt").value);
+
+    const payload = { graph, t0, t1, dt };
+    document.getElementById("out").textContent = "Running...";
+    if (typeof Plotly !== "undefined") { try { Plotly.purge("plot"); } catch(e){} }
+
+    try {
+      const res = await fetch("/simulate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+
+let raw = "";
+try {
+  raw = await res.text();
+} catch (e) {
+  raw = "";
+}
+
+if (!res.ok) {
+  const ct = res.headers.get("content-type") || "";
+  document.getElementById("out").textContent =
+    `HTTP ${res.status} ${res.statusText}
+content-type: ${ct}
+
+` + (raw || "(empty response)");
+  return;
+}
+
+// try parse JSON (now that we know it's OK)
+let data;
+try {
+  data = JSON.parse(raw);
+} catch (e) {
+  document.getElementById("out").textContent =
+    "OK response but not JSON:\n" + raw;
+  return;
+}
+
+            const keys = Object.keys(data.logs || {});
+      // Plot with Plotly if available
+      if (keys.length && typeof Plotly !== "undefined") {
+        const traces = keys.map(k => ({ x: data.t, y: data.logs[k], mode: "lines", name: k }));
+        Plotly.newPlot("plot", traces, { title: "Simulation results", xaxis: { title: "t" }, yaxis: { title: "value" } }, { responsive: true });
+        document.getElementById("out").textContent = `success=${data.success}
+message=${data.message}`;
+      } else {
+        let msg = `success=${data.success}
+message=${data.message}
+`;
+        if (keys.length) {
+          const k = keys[0];
+          msg += `first log: ${k}
+first 5: ${data.logs[k].slice(0,5).join(", ")}
+last: ${data.logs[k].slice(-1)[0]}`;
+        } else {
+          msg += "No logs.";
+        }
+        document.getElementById("out").textContent = msg;
+      }
+
+
+    } catch (e) {
+      document.getElementById("out").textContent = "Fetch failed: " + e;
+    }
+  };
+
+  // ---- Auto-create a default model on load (Constant -> Integrator) ----
+  try {
+    window.addBlock("Constant");
+    window.addBlock("Integrator");
+
+    const df0 = editor.export();
+    const nodesObj0 = df0.drawflow.Home.data;
+    const ids = Object.keys(nodesObj0).map(x => parseInt(x, 10)).sort((a,b)=>a-b);
+    if (ids.length >= 2) {
+      const cId = ids[ids.length-2];
+      const xId = ids[ids.length-1];
+      editor.addConnection(cId, xId, "output_1", "input_1");
+    }
+    setStatus("Default model added. You should see 2 blocks on canvas.");
+    console.log("After adding default model:", editor.export());
+  } catch (e) {
+    setStatus("JS ERROR while auto-adding model: " + e);
+    console.error(e);
+  }
+});
+</script>
+</body>
+</html>
