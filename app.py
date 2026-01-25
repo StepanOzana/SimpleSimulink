@@ -7,6 +7,7 @@ from werkzeug.exceptions import BadRequest
 import traceback
 import numpy as np
 from scipy.integrate import solve_ivp
+from scipy.signal import tf2ss
 
 app = Flask(__name__)
 
@@ -35,7 +36,8 @@ BLOCK_SPECS = {
     "Sum": {
         "inputs": ["u1", "u2"],
         "outputs": ["y"],
-        "params": {},
+        # Simulink-like signs string, e.g. "++" or "+-"
+        "params": {"signs": "++"},
     },
     "Gain": {
         "inputs": ["u"],
@@ -51,6 +53,14 @@ BLOCK_SPECS = {
         "inputs": ["u"],
         "outputs": ["y"],
         "params": {"x0": 0.0},
+    },
+
+    # Continuous-time Transfer Function block (strictly proper in MVP).
+    # Parameters are CSV strings like "1" and "1,1" (highest power first).
+    "TransferFunction": {
+        "inputs": ["u"],
+        "outputs": ["y"],
+        "params": {"num": "1", "den": "1,1"},
     },
 }
 
@@ -152,7 +162,11 @@ def topo_sort_algebraic(blocks_by_id: Dict[str, Dict[str, Any]], deps: Dict[str,
     Integrators are treated as state sources (their output is available immediately).
     Reject cycles among algebraic blocks ("pure algebraic cycles").
     """
-    algebraic = {bid for bid, b in blocks_by_id.items() if b["type"] != "Integrator"}
+    # Treat stateful blocks as sources (they break algebraic loops): Integrator + TransferFunction
+    algebraic = {
+        bid for bid, b in blocks_by_id.items()
+        if b["type"] not in ("Integrator", "TransferFunction")
+    }
     # compute in-degrees within algebraic subgraph, but ignore deps coming from integrators
     indeg: Dict[str, int] = {bid: 0 for bid in algebraic}
     forward: Dict[str, Set[str]] = {bid: set() for bid in algebraic}
@@ -208,7 +222,10 @@ def eval_block(
         signals[out_key(bid, "y")] = amp * np.sin(2.0 * np.pi * freq_hz * t + phase)
 
     elif btype == "Sum":
-        signals[out_key(bid, "y")] = float(inp("u1") + inp("u2"))
+        signs = str(get_param(block, "signs", "++")).strip()
+        s1 = -1.0 if (len(signs) > 0 and signs[0] == "-") else 1.0
+        s2 = -1.0 if (len(signs) > 1 and signs[1] == "-") else 1.0
+        signals[out_key(bid, "y")] = float(s1 * inp("u1") + s2 * inp("u2"))
 
     elif btype == "Gain":
         k = float(get_param(block, "k", 1.0))
@@ -229,13 +246,76 @@ def compile_model(graph: Dict[str, Any]) -> Dict[str, Any]:
     deps = build_dependency_graph(blocks_by_id, wires)
     algebraic_order = topo_sort_algebraic(blocks_by_id, deps)
 
+    # Stateful blocks: Integrator + TransferFunction
     integrators = [bid for bid, b in blocks_by_id.items() if b["type"] == "Integrator"]
+    tfs = [bid for bid, b in blocks_by_id.items() if b["type"] == "TransferFunction"]
+
+    # Build a packed state vector: all integrators first, then each TF's internal states
+    tf_ss: Dict[str, Dict[str, Any]] = {}
+
+    # helper to parse CSV coefficient lists
+    def _parse_coeff_list(s: Any) -> List[float]:
+        parts = [p.strip() for p in str(s or "").split(",") if p.strip()]
+        if not parts:
+            raise GraphError("TransferFunction: empty coefficient list")
+        try:
+            return [float(x) for x in parts]
+        except Exception:
+            raise GraphError("TransferFunction: coefficients must be numbers like '1, 2, 3'")
+
+    # Integrator states
+    state_slices: Dict[str, slice] = {}
+    cursor = 0
+    for bid in integrators:
+        state_slices[bid] = slice(cursor, cursor + 1)
+        cursor += 1
+
+    # TransferFunction states (continuous-time)
+    for bid in tfs:
+        b = blocks_by_id[bid]
+        num = _parse_coeff_list(get_param(b, "num", "1"))
+        den = _parse_coeff_list(get_param(b, "den", "1,1"))
+        if len(den) < 2:
+            raise GraphError(f"TransferFunction {bid}: den must have order >= 1 (e.g. '1,1')")
+
+        # Normalize to monic denominator for numerical stability
+        if den[0] == 0:
+            raise GraphError(f"TransferFunction {bid}: den[0] must be nonzero")
+        d0 = den[0]
+        den = [x / d0 for x in den]
+        num = [x / d0 for x in num]
+
+        # MVP restriction: strictly proper (no direct feedthrough), so deg(num) < deg(den)
+        if len(num) >= len(den):
+            raise GraphError(
+                f"TransferFunction {bid}: numerator degree must be < denominator degree (strictly proper) in MVP."
+            )
+
+        # Pad numerator so tf2ss gets a proper polynomial format
+        pad = (len(den) - 1) - len(num)
+        if pad > 0:
+            num = [0.0] * pad + num
+
+        A, B, C, D = tf2ss(num, den)
+        # Enforce D ~ 0 (strictly proper). We still accept tiny numerical noise.
+        if np.max(np.abs(D)) > 1e-9:
+            raise GraphError(
+                f"TransferFunction {bid}: direct feedthrough (D != 0) not supported in MVP. Make the TF strictly proper."
+            )
+
+        n = A.shape[0]
+        state_slices[bid] = slice(cursor, cursor + n)
+        cursor += n
+        tf_ss[bid] = {"A": A, "B": B, "C": C}
+
     state_index = {bid: i for i, bid in enumerate(integrators)}
 
     # initial state vector from x0 params
-    x0 = np.zeros(len(integrators), dtype=float)
-    for bid, i in state_index.items():
-        x0[i] = float(get_param(blocks_by_id[bid], "x0", 0.0))
+    x0 = np.zeros(cursor, dtype=float)
+    for bid in integrators:
+        sl = state_slices[bid]
+        x0[sl.start] = float(get_param(blocks_by_id[bid], "x0", 0.0))
+    # TF initial states default to zeros; you can add x0 later as an enhancement
 
     # validate scopes (optional)
     for ref in scope_refs:
@@ -250,7 +330,10 @@ def compile_model(graph: Dict[str, Any]) -> Dict[str, Any]:
         "input_map": input_map,
         "algebraic_order": algebraic_order,
         "integrators": integrators,
+        "tfs": tfs,
         "state_index": state_index,
+        "state_slices": state_slices,
+        "tf_ss": tf_ss,
         "x0": x0,
         "scope_refs": scope_refs,
     }
@@ -261,15 +344,25 @@ def make_rhs(compiled: Dict[str, Any]) -> Callable[[float, np.ndarray], np.ndarr
     input_map = compiled["input_map"]
     algebraic_order = compiled["algebraic_order"]
     integrators = compiled["integrators"]
-    state_index = compiled["state_index"]
+    tfs = compiled["tfs"]
+    state_slices = compiled["state_slices"]
+    tf_ss = compiled["tf_ss"]
 
     def rhs(t: float, x: np.ndarray) -> np.ndarray:
         signals: Dict[Tuple[str, str], float] = {}
 
-        # integrator outputs from state
+        # Integrator outputs from state
         for bid in integrators:
-            i = state_index[bid]
-            signals[out_key(bid, "y")] = float(x[i])
+            sl = state_slices[bid]
+            signals[out_key(bid, "y")] = float(x[sl.start])
+
+        # TransferFunction outputs from state (strictly proper: y = Cx)
+        for bid in tfs:
+            sl = state_slices[bid]
+            x_tf = x[sl]
+            C = tf_ss[bid]["C"]
+            y = float((C @ x_tf.reshape(-1, 1))[0, 0])
+            signals[out_key(bid, "y")] = y
 
         # compute algebraic blocks in topo order
         for bid in algebraic_order:
@@ -277,12 +370,24 @@ def make_rhs(compiled: Dict[str, Any]) -> Callable[[float, np.ndarray], np.ndarr
 
         # compute derivatives for integrators
         dx = np.zeros_like(x)
+
+        # Integrator derivatives: x' = u
         for bid in integrators:
-            i = state_index[bid]
-            # integrator input u must be wired
+            sl = state_slices[bid]
             src = input_map[(bid, "u")]
-            u = signals[out_key(src[0], src[1])]
-            dx[i] = float(u)
+            u = float(signals[out_key(src[0], src[1])])
+            dx[sl.start] = u
+
+        # TransferFunction derivatives: x' = A x + B u
+        for bid in tfs:
+            sl = state_slices[bid]
+            src = input_map[(bid, "u")]
+            u = float(signals[out_key(src[0], src[1])])
+            A = tf_ss[bid]["A"]
+            B = tf_ss[bid]["B"]
+            x_tf = x[sl].reshape(-1, 1)
+            dx_tf = (A @ x_tf) + (B * u)
+            dx[sl] = dx_tf.flatten()
         return dx
 
     return rhs
@@ -302,7 +407,9 @@ def simulate(graph: Dict[str, Any], t0: float, t1: float, dt: float) -> Dict[str
     input_map = compiled["input_map"]
     algebraic_order = compiled["algebraic_order"]
     integrators = compiled["integrators"]
-    state_index = compiled["state_index"]
+    tfs = compiled["tfs"]
+    state_slices = compiled["state_slices"]
+    tf_ss = compiled["tf_ss"]
     scope_refs: List[PortRef] = compiled["scope_refs"]
 
     logs: Dict[str, List[float]] = {}
@@ -316,8 +423,18 @@ def simulate(graph: Dict[str, Any], t0: float, t1: float, dt: float) -> Dict[str
         x = sol.y[:, k]
         signals: Dict[Tuple[str, str], float] = {}
 
+        # Integrator outputs
         for bid in integrators:
-            signals[out_key(bid, "y")] = float(x[state_index[bid]])
+            sl = state_slices[bid]
+            signals[out_key(bid, "y")] = float(x[sl.start])
+
+        # TransferFunction outputs (strictly proper)
+        for bid in tfs:
+            sl = state_slices[bid]
+            x_tf = x[sl]
+            C = tf_ss[bid]["C"]
+            y = float((C @ x_tf.reshape(-1, 1))[0, 0])
+            signals[out_key(bid, "y")] = y
 
         for bid in algebraic_order:
             eval_block(bid, blocks_by_id[bid], float(t), signals, input_map)

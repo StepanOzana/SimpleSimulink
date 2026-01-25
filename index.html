@@ -12,9 +12,9 @@
 
   <style>
     body { margin: 0; font-family: Arial, sans-serif; }
-    .layout { display: grid; grid-template-columns: 260px 1fr 320px; height: 100vh; }
+    .layout { display: grid; grid-template-columns: 260px 1fr; height: 100vh; }
     .panel { border-right: 1px solid #ddd; padding: 12px; overflow: auto; }
-    #drawflow { width: 100%; height: 100%; background: #f6f7f9; }
+    #drawflow { width: 100%; height: 100%; background: #f6f7f9; outline: none; }
     .toolbar button { width: 100%; margin: 6px 0; padding: 10px; cursor: pointer; }
     .blockbtn { text-align: left; }
     .kv { display: grid; grid-template-columns: 110px 1fr; gap: 8px; margin: 8px 0; }
@@ -28,23 +28,128 @@
     .node-title { font-weight: bold; margin-bottom: 6px; }
     .node-type { font-size: 12px; color: #666; }
     .node-params { font-size: 12px; color: #333; margin-top: 8px; }
-  </style>
+  
+    /* --- Port (connector) offset: move circles slightly outside block --- */
+    /* Drawflow renders ports as .input and .output inside .inputs/.outputs. */
+/* INPUT – žlutý – ven z bloku doleva (NEpřepisovat left:) */
+#drawflow.drawflow .drawflow-node .inputs .input{
+  transform: translateX(-12px) !important;
+  z-index: 20;
+}
+
+/* OUTPUT – bílý – ven z bloku doprava (NEpřepisovat right:) */
+#drawflow.drawflow .drawflow-node .outputs .output{
+  transform: translateX(12px) !important;
+  z-index: 20;
+}
+
+    /* Ensure ports stay clickable/visible above wires and node body */
+    #drawflow .drawflow-node .inputs .input,
+    #drawflow .drawflow-node .outputs .output {
+      z-index: 5;
+    }
+
+  
+    /* ===== Floating panels (Output + Plot) ===== */
+    .floating-panel {
+      position: fixed;
+      top: 60px;
+      right: 18px;
+      width: 360px;
+      max-height: calc(100vh - 90px);
+      background: #fff;
+      border: 1px solid #ddd;
+      border-radius: 12px;
+      box-shadow: 0 8px 30px rgba(0,0,0,0.18);
+      z-index: 9999;
+      display: none;
+      overflow: hidden;
+    }
+    .floating-panel.show { display: block; }
+
+    .fp-header{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      padding:10px 12px;
+      cursor: move;
+      user-select:none;
+      background:#f3f4f6;
+      border-bottom:1px solid #e5e7eb;
+      font-weight:700;
+    }
+    .fp-header .fp-actions{ display:flex; gap:8px; }
+    .fp-btn{
+      border:1px solid #d1d5db;
+      background:#fff;
+      border-radius:10px;
+      padding:6px 10px;
+      cursor:pointer;
+      font-weight:600;
+    }
+    .fp-btn:hover{ background:#f9fafb; }
+
+    .fp-body{
+      padding:12px;
+      overflow:auto;
+      max-height: calc(100vh - 150px);
+    }
+
+    /* Plot window is wider */
+    #plotWindow.floating-panel{ width: 560px; }
+    #plotCanvas{ height: 360px; }
+
+    /* Left panel selection editor */
+    .section-title{ margin: 14px 0 8px; font-size: 14px; font-weight: 800; }
+  
+    /* Collapsible block categories */
+    .blockcats details.cat { margin: 6px 0; }
+    .blockcats details.cat summary { cursor: pointer; user-select: none; font-weight: 600; }
+    .blockcats details.cat summary::-webkit-details-marker { display: none; }
+    .blockcats details.cat summary::before { content: "▾"; display: inline-block; width: 18px; }
+    .blockcats details.cat:not([open]) summary::before { content: "▸"; }
+    .blockcats details.cat .toolbar { margin-top: 6px; }
+
+</style>
 </head>
 <body>
 <div class="layout">
   <!-- Left panel -->
   <div class="panel">
     <h3>Blocks</h3>
-    <div class="toolbar">
-      <button class="blockbtn" onclick="addBlock('Constant')">+ Constant</button>
-      <button class="blockbtn" onclick="addBlock('Gain')">+ Gain</button>
-      <button class="blockbtn" onclick="addBlock('Sum')">+ Sum (u1,u2)</button>
-      <button class="blockbtn" onclick="addBlock('Integrator')">+ Integrator</button>
-      <button class="blockbtn" onclick="addBlock('Plot')">+ Plot</button>
-      <button class="blockbtn" onclick="addBlock('TransferFunction')">+ Transfer Function</button>
-    </div>
+    <div class="blockcats">
+      <details class="cat">
+        <summary>Sources</summary>
+        <div class="toolbar">
+          <button class="blockbtn" onclick="addBlock('Constant')">+ Constant</button>
+        </div>
+      </details>
 
-    <hr>
+      <details class="cat">
+        <summary>Math</summary>
+        <div class="toolbar">
+          <button class="blockbtn" onclick="addBlock('Gain')">+ Gain</button>
+          <button class="blockbtn" onclick="addBlock('Sum')">+ Sum (u1,u2)</button>
+        </div>
+      </details>
+
+      <details class="cat">
+        <summary>Models</summary>
+        <div class="toolbar">
+          <button class="blockbtn" onclick="addBlock('TransferFunction')">+ Transfer Function</button>
+          <button class="blockbtn" onclick="addBlock('Integrator')">+ Integrator</button>
+        </div>
+      </details>
+
+      <details class="cat">
+        <summary>Sinks</summary>
+        <div class="toolbar">
+          <button class="blockbtn" onclick="addBlock('Plot')">+ Plot</button>
+        </div>
+      </details>
+    </div>
+<hr>
     <h3>Run</h3>
     <div class="kv">
       <label>t0</label><input id="t0" type="number" value="0" step="0.1">
@@ -52,8 +157,13 @@
       <label>dt</label><input id="dt" type="number" value="0.1" step="0.01">
     </div>
 
+    <div class="section-title">Selected block</div>
+    <div id="selectedInfo" class="hint">Nothing selected.</div>
+    <div id="paramEditor"></div>
+
     <button onclick="exportGraph()">Export JSON</button>
     <button onclick="simulate()">Simulate</button>
+    <button id="toggleOutputBtn" style="margin-top:10px;" onclick="toggleOutput()">Show Output (F2)</button>
 
     <p class="hint">
       Tip: Klikni na blok pro editaci parametrů vpravo. Propoj porty tažením z výstupu do vstupu.
@@ -63,28 +173,122 @@
   </div>
 
   <!-- Canvas -->
-  <div id="drawflow" class="drawflow"></div>
+  <div id="drawflow" class="drawflow" tabindex="0"></div>
+</div>
 
-  <!-- Right panel -->
-  <div class="panel">
-    <h3>Selected block</h3>
-    <div id="selectedInfo" class="hint">Nothing selected.</div>
-    <div id="paramEditor"></div>
-
-    <hr>
-    <h3>Output</h3>
+<!-- Floating Output Panel (optional, toggle with button/F2) -->
+<div id="outputWindow" class="floating-panel" aria-hidden="true">
+  <div class="fp-header" id="outputHeader">
+    <span>Output</span>
+    <div class="fp-actions">
+      <button class="fp-btn" onclick="toggleOutput(false)">Close</button>
+    </div>
+  </div>
+  <div class="fp-body">
     <div id="jsStatus" class="hint">JS not started yet.</div>
-    <div id="plot" style="height:320px;"></div>
+    <div id="plot" style="height:240px;"></div>
     <div id="out" class="hint">—</div>
     <h4>Last exported JSON</h4>
     <pre id="jsonOut">{}</pre>
   </div>
 </div>
 
+<!-- Floating Plot Window (opened by double-click on Plot block) -->
+<div id="plotWindow" class="floating-panel" aria-hidden="true">
+  <div class="fp-header" id="plotHeader">
+    <span id="plotTitle">Plot</span>
+    <div class="fp-actions">
+      <button class="fp-btn" onclick="togglePlotWindow(false)">Close</button>
+    </div>
+  </div>
+  <div class="fp-body">
+    <div id="plotCanvas"></div>
+    <div id="plotMeta" class="hint" style="margin-top:8px;"></div>
+  </div>
+</div>
+
 <script>
+
 window.addEventListener("DOMContentLoaded", () => {
   const jsStatusEl = document.getElementById("jsStatus");
   const setStatus = (t) => { if (jsStatusEl) jsStatusEl.textContent = t; };
+  // ===== Floating window helpers =====
+  function toggleOutput(force) {
+    const w = document.getElementById("outputWindow");
+    const btn = document.getElementById("toggleOutputBtn");
+    if (!w) return;
+    const show = (typeof force === "boolean") ? force : !w.classList.contains("show");
+    w.classList.toggle("show", show);
+    w.setAttribute("aria-hidden", show ? "false" : "true");
+    if (btn) btn.textContent = show ? "Hide Output (F2)" : "Show Output (F2)";
+  }
+
+  function togglePlotWindow(force) {
+    const w = document.getElementById("plotWindow");
+    if (!w) return;
+    const show = (typeof force === "boolean") ? force : !w.classList.contains("show");
+    w.classList.toggle("show", show);
+    w.setAttribute("aria-hidden", show ? "false" : "true");
+    if (!show && typeof Plotly !== "undefined") { try { Plotly.purge("plotCanvas"); } catch(e){} }
+  }
+
+  // Expose to inline onclick handlers
+  window.toggleOutput = toggleOutput;
+  window.togglePlotWindow = togglePlotWindow;
+
+  function makeDraggable(winEl, headerEl) {
+    let dragging = false, startX = 0, startY = 0, origX = 0, origY = 0;
+
+    const onDown = (e) => {
+      if (e.target && e.target.closest && e.target.closest("button")) return;
+      dragging = true;
+      const r = winEl.getBoundingClientRect();
+      origX = r.left; origY = r.top;
+      startX = e.clientX; startY = e.clientY;
+      winEl.style.left = origX + "px";
+      winEl.style.top = origY + "px";
+      winEl.style.right = "auto";
+      e.preventDefault();
+    };
+
+    const onMove = (e) => {
+      if (!dragging) return;
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      winEl.style.left = (origX + dx) + "px";
+      winEl.style.top = (origY + dy) + "px";
+    };
+
+    const onUp = () => { dragging = false; };
+
+    headerEl.addEventListener("mousedown", onDown);
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
+
+  // F2 toggles Output window
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "F2") {
+      e.preventDefault();
+      toggleOutput();
+    }
+  });
+
+  // Init draggables + default hidden
+  setTimeout(() => {
+    const ow = document.getElementById("outputWindow");
+    const oh = document.getElementById("outputHeader");
+    const pw = document.getElementById("plotWindow");
+    const ph = document.getElementById("plotHeader");
+    if (ow && oh) makeDraggable(ow, oh);
+    if (pw && ph) makeDraggable(pw, ph);
+    toggleOutput(false);
+    togglePlotWindow(false);
+  }, 0);
+
+  // Store last simulation response for Plot double-click
+  let __lastSim = null;
+
 
   window.onerror = function(msg, url, line, col, err) {
     setStatus("JS ERROR: " + msg + " (line " + line + ")");
@@ -101,7 +305,7 @@ window.addEventListener("DOMContentLoaded", () => {
   const BLOCK_LIBRARY = {
     Constant:   { inputs: [], outputs: ["y"], defaultParams: { value: 1.0 } },
     Gain:       { inputs: ["u"], outputs: ["y"], defaultParams: { k: 1.0 } },
-    Sum:        { inputs: ["u1","u2"], outputs: ["y"], defaultParams: {} },
+    Sum:        { inputs: ["u1","u2"], outputs: ["y"], defaultParams: { signs: "++" } },
     Integrator: { inputs: ["u"], outputs: ["y"], defaultParams: { x0: 0.0 } },
     Plot:       { inputs: ["u"], outputs: [], defaultParams: { label: "" } },
     TransferFunction: { inputs: ["u"], outputs: ["y"], defaultParams: { num: "1", den: "1,1" } },
@@ -109,24 +313,141 @@ window.addEventListener("DOMContentLoaded", () => {
 
   // ---- Create Drawflow editor ----
   const container = document.getElementById("drawflow");
+  // Ensure the canvas has keyboard focus so Delete/Backspace works immediately after reload.
+  // (Drawflow's delete-connection handler relies on key events.)
+  if (container) {
+    try { container.setAttribute("tabindex", container.getAttribute("tabindex") || "0"); } catch(e) {}
+    container.addEventListener("mousedown", () => { try { container.focus(); } catch(e) {} });
+    container.addEventListener("touchstart", () => { try { container.focus(); } catch(e) {} }, { passive: true });
+  }
   const editor = new Drawflow(container);
   editor.reroute = true;
   editor.start();
   editor.editor_mode = "edit";
 
+  // --- Helpers for block rotation (Ctrl+R) ---
+  function getRotationDeg(nodeId) {
+    const n = editor.getNodeFromId(nodeId);
+    const r = n?.data?.rotationDeg;
+    return (typeof r === "number" && Number.isFinite(r)) ? r : 0;
+  }
+
+  function setRotationDeg(nodeId, deg) {
+    const n = editor.getNodeFromId(nodeId);
+    if (!n) return;
+
+    const norm = ((((deg % 360) + 360) % 360) / 90 | 0) * 90; // snap to 0/90/180/270
+    const newData = { ...(n.data || {}), rotationDeg: norm };
+    editor.updateNodeDataFromId(nodeId, newData);
+
+    // Apply to DOM (rotate around center)
+    const nodeEl = document.getElementById(`node-${nodeId}`);
+    if (nodeEl) {
+      nodeEl.style.transformOrigin = "center center";
+      nodeEl.style.transform = `rotate(${norm}deg)`;
+    }
+
+    // Recompute wire geometry
+    editor.updateConnectionNodes(`node-${nodeId}`);
+  }
+
+  // Ctrl+R rotates the currently selected block
+  document.addEventListener("keydown", (e) => {
+    // Don't steal Ctrl+R when typing into an input (parameter editor)
+    const tag = (e.target && e.target.tagName) ? e.target.tagName.toUpperCase() : "";
+    const isTyping = (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (e.target && e.target.isContentEditable));
+
+    if (!isTyping && e.ctrlKey && (e.key === "r" || e.key === "R")) {
+      e.preventDefault();
+      if (!selectedNodeId) return;
+      const cur = getRotationDeg(selectedNodeId);
+      setRotationDeg(selectedNodeId, cur + 90);
+    }
+  });
+
   setStatus("Editor started.");
 
   let selectedNodeId = null;
 
-  function nodeHtml(type, params) {
+    // ---- Short display names (canvas titles) ----
+  const SHORT_NAMES = {
+    Constant: "Const",
+    TransferFunction: "TF",
+    Integrator: "Int",
+    Gain: "Gain",
+    Sum: "Sum",
+    Plot: "Plot"
+  };
+
+  function shortTypeName(type) {
+    return SHORT_NAMES[type] || type;
+  }
+
+function nodeHtml(type, params, id) {
+        const shown = shortTypeName(type);
+    const title = (id !== undefined && id !== null && String(id).length) ? `${shown} (${id})` : shown;
+
+
+    // For Plot blocks, show a human-friendly signal origin (type+ID+port), not just a raw key like "2.y".
+    if (type === "Plot") {
+      const sig = (params && typeof params.__signalPretty === "string" && params.__signalPretty.trim())
+        ? params.__signalPretty.trim()
+        : "(not connected)";
+      const lbl = (params && typeof params.label === "string" && params.label.trim()) ? params.label.trim() : "";
+      return `
+        <div>
+          <div class="node-title">${title}</div>
+          <div class="node-type">scope</div>
+          ${lbl ? `<div class="node-params"><b>Label</b>: ${escapeHtml(lbl)}</div>` : ""}
+          <div class="node-params"><b>Signal</b>: ${escapeHtml(sig)}</div>
+        </div>
+      `;
+    }
+
     const p = JSON.stringify(params);
     return `
       <div>
-        <div class="node-title">${type}</div>
+        <div class="node-title">${title}</div>
         <div class="node-type">ports from library</div>
-        <div class="node-params"><b>params</b>: ${p}</div>
+        <div class="node-params"><b>params</b>: ${escapeHtml(p)}</div>
       </div>
     `;
+  }
+
+  function escapeHtml(s) {
+    return String(s)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  function getPrettySignalForPlotNode(plotNodeId) {
+    const pNode = editor.getNodeFromId(plotNodeId);
+    if (!pNode || !pNode.inputs || !pNode.inputs.input_1) return "";
+
+    const conns = pNode.inputs.input_1.connections || [];
+    if (!conns.length) return "";
+
+    const c = conns[0];
+    const srcId = String(c.node);
+    const srcNode = editor.getNodeFromId(parseInt(srcId, 10));
+    if (!srcNode) return "";
+    const srcType = srcNode.name;
+    const srcSpec = srcType ? BLOCK_LIBRARY[srcType] : null;
+
+    const outStr =
+      (typeof c.output === "string") ? c.output :
+      (typeof c.output_id === "string") ? c.output_id :
+      "output_1";
+
+    const mo = String(outStr).match(/output_(\d+)/);
+    const outIndex = mo ? (parseInt(mo[1], 10) - 1) : 0;
+    const port = (srcSpec && srcSpec.outputs && srcSpec.outputs[outIndex]) ? srcSpec.outputs[outIndex] : "y";
+
+    // Match the UI convention: Type (ID).port
+    return `${srcType} (${srcId}).${port}`;
   }
 
   // Expose addBlock/exportGraph/simulate globally for onclick handlers
@@ -143,7 +464,7 @@ window.addEventListener("DOMContentLoaded", () => {
     const x = 300 + Math.random() * 200;
     const y = 60 + Math.random() * 200;
 
-    editor.addNode(
+    const newId = editor.addNode(
       type,
       inputsCount,
       outputsCount,
@@ -152,6 +473,8 @@ window.addEventListener("DOMContentLoaded", () => {
       data,
       nodeHtml(type, params)
     );
+    // Update title to Type (ID)
+    refreshNodeHtml(newId);
   };
 
   editor.on("nodeSelected", function(id) {
@@ -167,10 +490,60 @@ window.addEventListener("DOMContentLoaded", () => {
   function refreshNodeHtml(id) {
     const n = editor.getNodeFromId(id);
     const type = n.name;
-    const params = n.data?.params || {};
-    editor.updateNodeDataFromId(id, n.data);
+    const baseParams = (n.data && n.data.params) ? n.data.params : {};
+
+    // For Plot blocks:
+    // - compute a friendly signal label (short type + ID + port)
+    // - if user has NOT set Label yet (empty), auto-fill it from Signal (still editable)
+    let sigPretty = "";
+    if (type === "Plot") {
+      sigPretty = computePlotSignalPretty(id) || "";
+      const curLabel = (typeof baseParams.label === "string") ? baseParams.label.trim() : "";
+      if (!curLabel && sigPretty) {
+        const newData = {
+          ...(n.data || {}),
+          params: { ...baseParams, label: sigPretty }
+        };
+        editor.updateNodeDataFromId(id, newData);
+        // keep local view in sync
+        baseParams.label = sigPretty;
+      }
+    }
+
+    const params = (type === "Plot")
+      ? { ...baseParams, __signalPretty: sigPretty }
+      : baseParams;
+
     const el = document.querySelector(`#node-${id} .drawflow_content_node`);
-    if (el) el.innerHTML = nodeHtml(type, params);
+    if (el) el.innerHTML = nodeHtml(type, params, id);
+  }
+
+  function computePlotSignalPretty(plotNodeId) {
+    const pNode = editor.getNodeFromId(plotNodeId);
+    if (!pNode || !pNode.inputs || !pNode.inputs.input_1) return "";
+    const conns = pNode.inputs.input_1.connections || [];
+    if (!conns.length) return "";
+
+    const c = conns[0];
+    const srcId = String(c.node);
+    const srcNode = editor.getNodeFromId(parseInt(srcId, 10));
+    if (!srcNode) return `${srcId}.?`;
+
+    const srcType = srcNode.name || "";
+    const srcSpec = srcType ? BLOCK_LIBRARY[srcType] : null;
+
+    const outStr =
+      (typeof c.output === "string") ? c.output :
+      (typeof c.output_id === "string") ? c.output_id :
+      "output_1";
+
+    const mo = String(outStr).match(/output_(\d+)/);
+    const outIndex = mo ? (parseInt(mo[1], 10) - 1) : 0;
+    const port = (srcSpec && srcSpec.outputs && srcSpec.outputs[outIndex]) ? srcSpec.outputs[outIndex] : "y";
+
+    // Match the block naming style used elsewhere: Type (ID) (shortened for display)
+    const short = shortTypeName(srcType);
+    return `${short} (${srcId}).${port}`;
   }
 
   function renderParamEditor() {
@@ -273,6 +646,41 @@ inp.addEventListener("keydown", (e) => {
     }
     const plotSignals = []; // {block, port, label}
 
+    // Collect Plot blocks as "scopes": each Plot block logs the signal connected to its input.
+    for (const plotId of Array.from(plotNodeIds)) {
+      const pNode = nodesObj[plotId];
+      if (!pNode) continue;
+
+      // label (optional)
+      const lbl = (pNode.data && pNode.data.params && typeof pNode.data.params.label === "string") ? pNode.data.params.label : "";
+
+      // Plot has single input "u" -> Drawflow key is "input_1"
+      const inObj = (pNode.inputs && pNode.inputs.input_1) ? pNode.inputs.input_1 : null;
+      const conns = (inObj && Array.isArray(inObj.connections)) ? inObj.connections : [];
+      if (!conns.length) continue;
+
+      // We only support one signal per Plot for now (first connection)
+      const c = conns[0];
+      const srcId = String(c.node);
+      const srcNode = nodesObj[srcId];
+      if (!srcNode) continue;
+      if (srcNode.name === "Plot") continue;
+
+      const srcSpec = BLOCK_LIBRARY[srcNode.name];
+      if (!srcSpec) continue;
+
+      const outStr =
+        (typeof c.output === "string") ? c.output :
+        (typeof c.output_id === "string") ? c.output_id :
+        "output_1";
+
+      const mo = String(outStr).match(/output_(\d+)/);
+      const outIndex = mo ? (parseInt(mo[1], 10) - 1) : 0;
+      const outPortName = srcSpec.outputs[outIndex] || srcSpec.outputs[0] || "y";
+
+      plotSignals.push({ plotId: String(plotId), block: srcId, port: outPortName, label: lbl });
+    }
+
 
     const blocks = [];
     const wires = [];
@@ -285,7 +693,7 @@ inp.addEventListener("keydown", (e) => {
         id: String(nid),
         type,
         params,
-        ui: { x: node.pos_x, y: node.pos_y }
+        ui: { x: node.pos_x, y: node.pos_y, rotationDeg: (node.data && typeof node.data.rotationDeg === 'number') ? node.data.rotationDeg : 0 }
       });
     }
 
@@ -337,286 +745,56 @@ for (const [dstIdRaw, dstNode] of Object.entries(nodesObj)) {
   }
 }
 
+// TransferFunction is now simulated server-side (no export-time macro needed).
 
-// --- Expand TransferFunction blocks into primitives (export-time macro) ---
-function parseCoeffList(s) {
-  return String(s || "")
-    .split(",")
-    .map(x => x.trim())
-    .filter(x => x.length)
-    .map(Number);
-}
+    // If there are Plot blocks, log the union of their connected signals.
+// Otherwise (no Plot blocks), log all Integrator outputs by default.
+const scopeSignals =
+  (plotSignals.length
+    ? Array.from(new Map(plotSignals.map(s => [`${s.block}.${s.port}`, { block: s.block, port: s.port }])).values())
+    : blocks.filter(b => b.type === "Integrator").map(b => ({ block: b.id, port: "y" })));
 
-function makeIdFactory(existing) {
-  let c = 1;
-  return (prefix) => {
-    while (existing.has(prefix + c)) c++;
-    const id = prefix + c;
-    existing.add(id);
-    return id;
-  };
-}
-
-function sumMany(signals) {
-  if (signals.length === 0) throw new Error("sumMany: empty");
-  if (signals.length === 1) return signals[0];
-
-  let acc = signals[0];
-  for (let i = 1; i < signals.length; i++) {
-    const sid = makeBlock("Sum", {});
-    makeWire(acc, { block: sid, port: "u1" });
-    makeWire(signals[i], { block: sid, port: "u2" });
-    acc = { block: sid, port: "y" };
-  }
-  return acc;
-}
-
-// Build quick lookup for block types by id (current blocks array)
-const typeById = new Map(blocks.map(b => [String(b.id), b.type]));
-// Keep the original mapping too (we will remove TF blocks later)
-const origTypeById = new Map(blocks.map(b => [String(b.id), b.type]));
-
-const tfBlocks = blocks.filter(b => b.type === "TransferFunction");
-
-// Map TF id -> internal output signal {block,port}
-const tfOutSignal = new Map();
-
-if (tfBlocks.length) {
-  const usedIds = new Set(blocks.map(b => String(b.id)));
-  const newId = makeIdFactory(usedIds);
-
-  // helper to create blocks and wires (updates lookup maps)
-  function makeBlock(type, params) {
-    const id = newId("tf_");
-    blocks.push({ id, type, params: params || {}, ui: { x: 0, y: 0 } });
-    typeById.set(String(id), type);
-    return String(id);
-  }
-  function makeWire(fromSig, toSig) {
-    wires.push({
-      from: { block: String(fromSig.block), port: fromSig.port },
-      to:   { block: String(toSig.block), port: toSig.port }
-    });
-  }
-
-  // Gather TF input and output wiring from current wires
-  // tfIn: tfId -> {block,port} (what drives TF.u)
-  // tfOut: tfId -> array of {block,port} (where TF.y was connected)
-  const tfIn = new Map();
-  const tfOut = new Map();
-
-  for (const w of wires) {
-    const toId = String(w.to.block);
-    const fromId = String(w.from.block);
-
-    if (origTypeById.get(toId) === "TransferFunction" && w.to.port === "u") {
-      tfIn.set(toId, { block: String(w.from.block), port: w.from.port });
-    }
-    if (origTypeById.get(fromId) === "TransferFunction" && w.from.port === "y") {
-      if (!tfOut.has(fromId)) tfOut.set(fromId, []);
-      tfOut.get(fromId).push({ block: String(w.to.block), port: w.to.port });
-    }
-  }
-
-  // Remove all TF-related wires (we will replace them)
-  for (let i = wires.length - 1; i >= 0; i--) {
-    const w = wires[i];
-    if (origTypeById.get(String(w.from.block)) === "TransferFunction" ||
-        origTypeById.get(String(w.to.block)) === "TransferFunction") {
-      wires.splice(i, 1);
-    }
-  }
-
-  // Remove TF blocks from blocks list (server doesn't understand TF blocks)
-  for (let i = blocks.length - 1; i >= 0; i--) {
-    if (blocks[i].type === "TransferFunction") {
-      typeById.delete(String(blocks[i].id));
-      blocks.splice(i, 1);
-    }
-  }
-
-  // Expand TFs into integrators/gains/sums (controllable canonical form)
-  // Important: handle series TF->TF by expanding in dependency order.
-  const remaining = tfBlocks.slice();
-
-  while (remaining.length) {
-    let progressed = false;
-
-    for (let idx = remaining.length - 1; idx >= 0; idx--) {
-      const tf = remaining[idx];
-      const tfId = String(tf.id);
-
-      // Resolve TF input signal
-      let uSig = tfIn.get(tfId);
-      if (!uSig) throw new Error(`TransferFunction ${tfId}: input u is not connected`);
-
-      // If TF input is coming from another TF, wait until that TF is expanded
-      if (origTypeById.get(String(uSig.block)) === "TransferFunction") {
-        const upstreamTfId = String(uSig.block);
-        if (!tfOutSignal.has(upstreamTfId)) {
-          continue; // expand upstream first
-        }
-        uSig = tfOutSignal.get(upstreamTfId);
-      }
-
-      const outDests = tfOut.get(tfId) || [];
-
-      const num = parseCoeffList(tf.params?.num);
-      const den = parseCoeffList(tf.params?.den);
-
-      if (den.length < 2) throw new Error(`TransferFunction ${tfId}: den must have order >= 1 (e.g. "1,1")`);
-      if (num.length < 1) throw new Error(`TransferFunction ${tfId}: num must have at least 1 coeff`);
-      if (!Number.isFinite(den[0]) || den[0] === 0) throw new Error(`TransferFunction ${tfId}: den[0] must be nonzero`);
-
-      // Normalize to monic den[0] == 1
-      const d0 = den[0];
-      const denN = den.map(x => x / d0); // [1, a1..an]
-      const numN = num.map(x => x / d0);
-
-      const n = denN.length - 1; // order
-      if (numN.length > n + 1) throw new Error(`TransferFunction ${tfId}: numerator degree must be <= denominator degree`);
-
-      // Pad numerator to length n+1 (highest power first)
-      const padCount = (n + 1) - numN.length;
-      const b = (padCount > 0 ? Array(padCount).fill(0).concat(numN) : numN.slice()); // [b0..bn]
-      const a = denN.slice(1); // [a1..an], length n
-
-      const b0 = b[0];
-      const D = b0;
-
-      // C aligned with states x1..xn:
-      // C_i = b_{n+1-i} - a_{n+1-i}*b0  (i=1..n)
-      const C = [];
-      for (let i0 = 0; i0 < n; i0++) {
-        const bi = b[n - i0];          // b_n, b_{n-1}, ..., b_1
-        const ai = a[n - 1 - i0];      // a_n, a_{n-1}, ..., a_1
-        C.push(bi - ai * b0);
-      }
-
-      // Create n integrators for x1..xn
-      const xIds = [];
-      for (let i0 = 0; i0 < n; i0++) {
-        xIds.push(makeBlock("Integrator", { x0: 0.0 }));
-      }
-
-      // Chain xdot_i = x_{i+1}
-      for (let i0 = 0; i0 < n - 1; i0++) {
-        makeWire({ block: xIds[i0 + 1], port: "y" }, { block: xIds[i0], port: "u" });
-      }
-
-      // xdot_n = u + sum_j (-a_{n-j+1} * x_j)
-      const lastTerms = [];
-      lastTerms.push({ block: uSig.block, port: uSig.port });
-
-      for (let j0 = 0; j0 < n; j0++) {
-        const coeff = -a[n - 1 - j0]; // [-a_n .. -a_1] aligned with x1..xn
-        if (!Number.isFinite(coeff) || coeff === 0) continue;
-        const gid = makeBlock("Gain", { k: coeff });
-        makeWire({ block: xIds[j0], port: "y" }, { block: gid, port: "u" });
-        lastTerms.push({ block: gid, port: "y" });
-      }
-
-      const xdotnSig = sumMany(lastTerms);
-      makeWire(xdotnSig, { block: xIds[n - 1], port: "u" });
-
-      // y = D*u + sum_i(C_i * x_i)
-      const yTerms = [];
-      if (Number.isFinite(D) && D !== 0) {
-        const gd = makeBlock("Gain", { k: D });
-        makeWire({ block: uSig.block, port: uSig.port }, { block: gd, port: "u" });
-        yTerms.push({ block: gd, port: "y" });
-      }
-
-      for (let i0 = 0; i0 < n; i0++) {
-        const coeff = C[i0];
-        if (!Number.isFinite(coeff) || coeff === 0) continue;
-        const gid = makeBlock("Gain", { k: coeff });
-        makeWire({ block: xIds[i0], port: "y" }, { block: gid, port: "u" });
-        yTerms.push({ block: gid, port: "y" });
-      }
-
-      let ySig;
-      if (yTerms.length === 0) {
-        const z = makeBlock("Constant", { value: 0.0 });
-        ySig = { block: z, port: "y" };
-      } else {
-        ySig = sumMany(yTerms);
-      }
-
-      // Save resolved output of this TF (for TF-in-series cases)
-      tfOutSignal.set(tfId, ySig);
-
-      // Rewire destinations that previously connected to TF.y
-      // - If destination is another TF input, update tfIn for that TF instead of creating a wire
-      //   (because TF blocks are removed from 'blocks').
-      for (const d of outDests) {
-        const dstId = String(d.block);
-        if (origTypeById.get(dstId) === "TransferFunction" && d.port === "u") {
-          tfIn.set(dstId, { block: String(ySig.block), port: ySig.port });
-        } else {
-          makeWire(ySig, d);
-        }
-      }
-
-      // remove this TF from remaining
-      remaining.splice(idx, 1);
-      progressed = true;
-    }
-
-    if (!progressed) {
-      const pending = remaining.map(t => String(t.id)).join(", ");
-      throw new Error(
-        `TransferFunction expansion stuck. Likely TF->TF cycle or missing connection. Pending TF ids: ${pending}`
-      );
-    }
-  }
-}
-
-    // Extract plot signals from Plot nodes (their input connections)
-    for (const pid of plotNodeIds) {
-      const pnode = nodesObj[pid];
-      const label = (pnode.data && pnode.data.params && typeof pnode.data.params.label === "string") ? pnode.data.params.label : "";
-      const inputs = pnode.inputs || {};
-      const in1 = inputs["input_1"];
-      const conns = in1 ? (in1.connections || []) : [];
-      if (conns.length === 1) {
-        const c = conns[0];
-        const srcId = String(c.node);
-        if (!nodesObj[srcId]) continue;
-        const srcNode = nodesObj[srcId];
-        const srcSpec = BLOCK_LIBRARY[srcNode.name];
-        if (!srcSpec) continue;
-                const outStr = (typeof c.output === "string") ? c.output : (typeof c.output_id === "string" ? c.output_id : "");
-        const m = outStr.match(/output_(\d+)/);
-        if (!m) continue;
-        const outIndex = parseInt(m[1], 10) - 1;
-
-        const outPortName = srcSpec.outputs[outIndex];
-        let sig = { block: srcId, port: outPortName };
-if (tfOutSignal && tfOutSignal.has(srcId)) {
-  sig = tfOutSignal.get(srcId);
-}
-plotSignals.push({ block: String(sig.block), port: sig.port, label: label || (String(sig.block) + "." + sig.port) });
-      }
-    }
-
-    const scopes = [{
-      signals: (plotSignals.length ? plotSignals.map(s => ({ block: s.block, port: s.port }))
-                               : blocks.filter(b => b.type === "Integrator").map(b => ({ block: b.id, port: "y" })))
-    }];
+const scopes = [{ signals: scopeSignals }];
 
     const graph = { blocks, wires, scopes };
     document.getElementById("jsonOut").textContent = JSON.stringify(graph, null, 2);
     return graph;
   };
 
-  window.simulate = async function simulate() {
+  
+  // Map server log keys (e.g., "2.y" or "2(TransferFunction).y") to a clear, human-friendly label like "TransferFunction (2).y"
+  function prettyLabelForLogKey(k) {
+    const s = String(k || "");
+    let id = null, port = null, typeHint = null;
+
+    let m = s.match(/^(\d+)\([^)]*\)\.([A-Za-z0-9_]+)$/);
+    if (m) { id = m[1]; port = m[2]; }
+
+    if (!id) {
+      m = s.match(/^(\d+)\.([A-Za-z0-9_]+)$/);
+      if (m) { id = m[1]; port = m[2]; }
+    }
+
+    if (!id) {
+      m = s.match(/^([A-Za-z0-9_]+)\((\d+)\)\.([A-Za-z0-9_]+)$/);
+      if (m) { typeHint = m[1]; id = m[2]; port = m[3]; }
+    }
+
+    if (!id || !port) return s;
+
+    const n = editor.getNodeFromId(parseInt(id, 10));
+    const type = (n && n.name) ? n.name : (typeHint || "Block");
+    return `${shortTypeName(type)} (${id}).${port}`;
+  }
+
+window.simulate = async function simulate() {
     const graph = window.exportGraph();
     const t0 = parseFloat(document.getElementById("t0").value);
     const t1 = parseFloat(document.getElementById("t1").value);
     const dt = parseFloat(document.getElementById("dt").value);
 
     const payload = { graph, t0, t1, dt };
+    try{ toggleOutput(true); }catch(e){}
     document.getElementById("out").textContent = "Running...";
     if (typeof Plotly !== "undefined") { try { Plotly.purge("plot"); } catch(e){} }
 
@@ -648,6 +826,7 @@ content-type: ${ct}
 let data;
 try {
   data = JSON.parse(raw);
+  try{ __lastSim = data; }catch(e){}
 } catch (e) {
   document.getElementById("out").textContent =
     "OK response but not JSON:\n" + raw;
@@ -657,7 +836,7 @@ try {
             const keys = Object.keys(data.logs || {});
       // Plot with Plotly if available
       if (keys.length && typeof Plotly !== "undefined") {
-        const traces = keys.map(k => ({ x: data.t, y: data.logs[k], mode: "lines", name: k }));
+        const traces = keys.map(k => ({ x: data.t, y: data.logs[k], mode: "lines", name: prettyLabelForLogKey(k) }));
         Plotly.newPlot("plot", traces, { title: "Simulation results", xaxis: { title: "t" }, yaxis: { title: "value" } }, { responsive: true });
         document.getElementById("out").textContent = `success=${data.success}
 message=${data.message}`;
@@ -682,25 +861,383 @@ last: ${data.logs[k].slice(-1)[0]}`;
     }
   };
 
-  // ---- Auto-create a default model on load (Constant -> Integrator) ----
-  try {
-    window.addBlock("Constant");
-    window.addBlock("Integrator");
+  
+  // =========================
+  // Orthogonal routing + grid + stubs + collision avoidance (checkpoint v1)
+  // =========================
+  const WIRE_GRID = 20;        // grid step for bends
+  const STUB = 30;             // horizontal stub length out of ports
+  const AVOID_MARGIN = 12;     // inflate node boxes for collision check
+  const CHANNEL_STEP = 40;     // search step for up/down channels
+  const CHANNEL_TRIES = 8;     // how many channels to try
 
-    const df0 = editor.export();
-    const nodesObj0 = df0.drawflow.Home.data;
-    const ids = Object.keys(nodesObj0).map(x => parseInt(x, 10)).sort((a,b)=>a-b);
-    if (ids.length >= 2) {
-      const cId = ids[ids.length-2];
-      const xId = ids[ids.length-1];
-      editor.addConnection(cId, xId, "output_1", "input_1");
-    }
-    setStatus("Default model added. You should see 2 blocks on canvas.");
-    console.log("After adding default model:", editor.export());
-  } catch (e) {
-    setStatus("JS ERROR while auto-adding model: " + e);
-    console.error(e);
+  const snap = (v) => Math.round(v / WIRE_GRID) * WIRE_GRID;
+
+  function screenToCanvas(clientX, clientY) {
+    const precanvas = document.querySelector(".drawflow .precanvas");
+    if (!precanvas) return { x: clientX, y: clientY };
+    const preRect = precanvas.getBoundingClientRect();
+    const tf = getComputedStyle(precanvas).transform;
+    const inv = (tf && tf !== "none") ? new DOMMatrixReadOnly(tf).inverse() : new DOMMatrixReadOnly().inverse();
+    const p = new DOMPoint(clientX - preRect.left, clientY - preRect.top).matrixTransform(inv);
+    return { x: p.x, y: p.y };
   }
+
+  function portCenterCanvas(portEl) {
+    const r = portEl.getBoundingClientRect();
+    return screenToCanvas(r.left + r.width / 2, r.top + r.height / 2);
+  }
+
+  function rectsOfNodesCanvas(exceptNodeIds = new Set()) {
+    const precanvas = document.querySelector(".drawflow .precanvas");
+    if (!precanvas) return [];
+    const preRect = precanvas.getBoundingClientRect();
+    const tf = getComputedStyle(precanvas).transform;
+    const inv = (tf && tf !== "none") ? new DOMMatrixReadOnly(tf).inverse() : new DOMMatrixReadOnly().inverse();
+
+    const rects = [];
+    document.querySelectorAll(".drawflow-node").forEach(nodeEl => {
+      const idAttr = nodeEl.getAttribute("id") || "";
+      const m = idAttr.match(/^node-(\d+)$/);
+      if (!m) return;
+      const nodeId = m[1];
+      if (exceptNodeIds.has(String(nodeId))) return;
+
+      const r = nodeEl.getBoundingClientRect();
+      const p1 = new DOMPoint(r.left - preRect.left, r.top - preRect.top).matrixTransform(inv);
+      const p2 = new DOMPoint(r.right - preRect.left, r.bottom - preRect.top).matrixTransform(inv);
+
+      const x1 = Math.min(p1.x, p2.x) - AVOID_MARGIN;
+      const y1 = Math.min(p1.y, p2.y) - AVOID_MARGIN;
+      const x2 = Math.max(p1.x, p2.x) + AVOID_MARGIN;
+      const y2 = Math.max(p1.y, p2.y) + AVOID_MARGIN;
+
+      rects.push({ nodeId, x1, y1, x2, y2 });
+    });
+    return rects;
+  }
+
+  function segIntersectsRect(ax, ay, bx, by, r) {
+    // Only orthogonal segments supported
+    if (ax === bx) { // vertical
+      const x = ax;
+      const yMin = Math.min(ay, by), yMax = Math.max(ay, by);
+      return (x >= r.x1 && x <= r.x2 && yMax >= r.y1 && yMin <= r.y2);
+    }
+    if (ay === by) { // horizontal
+      const y = ay;
+      const xMin = Math.min(ax, bx), xMax = Math.max(ax, bx);
+      return (y >= r.y1 && y <= r.y2 && xMax >= r.x1 && xMin <= r.x2);
+    }
+    return false;
+  }
+
+  function pathIntersectsAnyRect(points, rects) {
+    for (let i = 0; i < points.length - 1; i++) {
+      const a = points[i], b = points[i + 1];
+      for (const r of rects) {
+        if (segIntersectsRect(a.x, a.y, b.x, b.y, r)) return true;
+      }
+    }
+    return false;
+  }
+
+  function pointsToD(points) {
+    return "M " + points.map(p => `${p.x} ${p.y}`).join(" L ");
+  }
+
+  function findPort(nodeId, kind, portName) {
+    // kind: "output" or "input"
+    const nodeEl = document.getElementById(`node-${nodeId}`);
+    if (!nodeEl) return null;
+    if (kind === "output") {
+      return nodeEl.querySelector(`.outputs .output[data-output="${portName}"]`) || null;
+    } else {
+      return nodeEl.querySelector(`.inputs .input[data-input="${portName}"]`) || null;
+    }
+  }
+
+  function buildPoints(outPortEl, inPortEl, snapBends, meta) {
+    const A = portCenterCanvas(outPortEl);
+    const B = portCenterCanvas(inPortEl);
+
+    const A1 = { x: A.x + STUB, y: A.y };
+    const B1 = { x: B.x - STUB, y: B.y };
+
+    const mxBase = (A1.x + B1.x) / 2;
+    const mx = snapBends ? snap(mxBase) : mxBase;
+
+    const except = new Set();
+    if (meta?.node_out) except.add(String(meta.node_out));
+    if (meta?.node_in) except.add(String(meta.node_in));
+    const rects = rectsOfNodesCanvas(except);
+
+    // Candidate 1: classic S-route via mx
+    const cand1 = [
+      A, A1,
+      { x: mx, y: A1.y },
+      { x: mx, y: B1.y },
+      B1, B
+    ];
+    if (!pathIntersectsAnyRect(cand1, rects)) return cand1;
+
+    // Candidates 2..: channel above/below
+    const yA = snapBends ? snap(A1.y) : A1.y;
+    const yB = snapBends ? snap(B1.y) : B1.y;
+    const midY = (yA + yB) / 2;
+    const midY0 = snapBends ? snap(midY) : midY;
+
+    for (let k = 0; k < CHANNEL_TRIES; k++) {
+      const dy = CHANNEL_STEP * (k + 1);
+      const yUp = snapBends ? snap(midY0 - dy) : (midY0 - dy);
+      const yDn = snapBends ? snap(midY0 + dy) : (midY0 + dy);
+
+      const candUp = [
+        A, A1,
+        { x: A1.x, y: yUp },
+        { x: B1.x, y: yUp },
+        B1, B
+      ];
+      if (!pathIntersectsAnyRect(candUp, rects)) return candUp;
+
+      const candDn = [
+        A, A1,
+        { x: A1.x, y: yDn },
+        { x: B1.x, y: yDn },
+        B1, B
+      ];
+      if (!pathIntersectsAnyRect(candDn, rects)) return candDn;
+    }
+
+    // Fallback
+    return cand1;
+  }
+
+  function updateOrthogonalConnections(snapBends = true) {
+    document.querySelectorAll(".connection").forEach(conn => {
+      const nodeOut = conn.dataset.node_out || conn.getAttribute("data-node_out");
+      const nodeIn  = conn.dataset.node_in  || conn.getAttribute("data-node_in");
+      const outName = conn.dataset.output   || conn.getAttribute("data-output");
+      const inName  = conn.dataset.input    || conn.getAttribute("data-input");
+      if (!nodeOut || !nodeIn || !outName || !inName) return;
+
+      const outPort = findPort(nodeOut, "output", outName);
+      const inPort  = findPort(nodeIn,  "input",  inName);
+      if (!outPort || !inPort) return;
+
+      const points = findPoints(outPort, inPort, snapBends, { node_out: nodeOut, node_in: nodeIn });
+
+      // Drawflow renders multiple paths per connection (visual + hit-area).
+      // Keep ALL of them in sync, otherwise selection/delete can behave oddly until a node moves.
+      const d = pointsToD(points);
+      conn.querySelectorAll("path").forEach(p => {
+        try { p.setAttribute("d", d); } catch (e) {}
+      });
+    });
+  }
+
+  // alias to avoid accidental name collision
+  const findPoints = buildPoints;
+
+  // Smooth while dragging nodes; snap on mouseup
+  editor.on("nodeMoved", () => updateOrthogonalConnections(false));
+  document.addEventListener("mouseup", () => updateOrthogonalConnections(true));
+
+  // Force endpoints to port centers while dragging a wire
+  let __draggingWire = false;
+  let __raf = null;
+
+  function rafTick() {
+    if (__draggingWire) {
+      updateOrthogonalConnections(false);
+      __raf = requestAnimationFrame(rafTick);
+    } else {
+      __raf = null;
+    }
+  }
+
+  document.addEventListener("mousedown", (ev) => {
+    const t = ev.target;
+    if (t && (t.classList?.contains("output") || t.classList?.contains("input"))) {
+      __draggingWire = true;
+      if (!__raf) __raf = requestAnimationFrame(rafTick);
+    }
+  });
+
+  document.addEventListener("mouseup", () => {
+    __draggingWire = false;
+    updateOrthogonalConnections(true);
+  });
+
+  // Also refresh after connections change / zoom / pan
+  function refreshAllPlotNodeLabels() {
+    try {
+      const df = editor.export();
+      const nodesObj = df.drawflow.Home.data || {};
+      for (const [nid, node] of Object.entries(nodesObj)) {
+        if (node && node.name === "Plot") refreshNodeHtml(parseInt(nid, 10));
+      }
+    } catch (e) {}
+  }
+
+  editor.on("connectionCreated", () => { updateOrthogonalConnections(true); refreshAllPlotNodeLabels(); });
+  editor.on("connectionRemoved", () => { updateOrthogonalConnections(true); refreshAllPlotNodeLabels(); });
+  try { editor.on("zoom", () => updateOrthogonalConnections(false)); } catch (e) {}
+
+
+  // ===== Double-click on Plot block: open its own plot window =====
+  function openPlotForPlotNode(plotNodeId) {
+    const n = editor.getNodeFromId(plotNodeId);
+    const label = (n && n.data && n.data.params && typeof n.data.params.label === "string" && n.data.params.label.trim())
+      ? n.data.params.label.trim()
+      : `Plot ${plotNodeId}`;
+
+    const titleEl = document.getElementById("plotTitle");
+    if (titleEl) titleEl.textContent = label;
+
+    // If no sim yet, run it first
+    if (!__lastSim || !__lastSim.t || !__lastSim.logs) {
+      try{ toggleOutput(true); }catch(e){}
+      window.simulate().then(() => setTimeout(() => openPlotForPlotNode(plotNodeId), 0));
+      return;
+    }
+
+const keys = Object.keys(__lastSim.logs || {});
+if (!keys.length) return;
+
+// Resolve which signal belongs to THIS Plot block (based on its input connection).
+const key = (function resolveKeyForPlot(plotNodeId) {
+  const pNode = editor.getNodeFromId(plotNodeId);
+  if (!pNode || !pNode.inputs || !pNode.inputs.input_1) return keys[0];
+
+  const conns = pNode.inputs.input_1.connections || [];
+  if (!conns.length) return keys[0];
+
+  const c = conns[0];
+  const srcId = String(c.node);
+  const srcNode = editor.getNodeFromId(parseInt(srcId, 10));
+  const srcType = srcNode ? srcNode.name : "";
+  const srcSpec = srcType ? BLOCK_LIBRARY[srcType] : null;
+
+  const outStr =
+    (typeof c.output === "string") ? c.output :
+    (typeof c.output_id === "string") ? c.output_id :
+    "output_1";
+
+  const mo = String(outStr).match(/output_(\d+)/);
+  const outIndex = mo ? (parseInt(mo[1], 10) - 1) : 0;
+  const port = (srcSpec && srcSpec.outputs && srcSpec.outputs[outIndex]) ? srcSpec.outputs[outIndex] : "y";
+
+  // Try a few common server key formats, then fall back to fuzzy match.
+  const candidates = [
+    `${srcId}(${srcType}).${port}`,
+    `${srcId}.${port}`,
+    `${srcType}(${srcId}).${port}`,
+    `${srcType}${srcId}.${port}`,
+    `${srcId}:${port}`,
+  ];
+  for (const cand of candidates) {
+    if (Object.prototype.hasOwnProperty.call(__lastSim.logs, cand)) return cand;
+  }
+
+  // Fuzzy: match by id + port, optionally type in parentheses.
+  const re1 = new RegExp(`^${srcId}\\([^)]*\\)\\.${port}$`);
+  for (const k of keys) if (re1.test(k)) return k;
+
+  const re2 = new RegExp(`(^|[^0-9])${srcId}([^0-9]|$)`);
+  for (const k of keys) {
+    if (k.includes(`.${port}`) && re2.test(k)) return k;
+  }
+
+  return keys[0];
+})(plotNodeId);
+
+const metaEl = document.getElementById("plotMeta");
+if (metaEl) {
+  const pretty = computePlotSignalPretty(plotNodeId) || key;
+  // Show both: clear origin + actual server log key (useful for debugging)
+  metaEl.textContent = (pretty === key) ? `Signal: ${pretty}` : `Signal: ${pretty}  (log key: ${key})`;
+}
+    togglePlotWindow(true);
+    if (typeof Plotly !== "undefined") {
+      Plotly.newPlot(
+        "plotCanvas",
+        [{ x: __lastSim.t, y: __lastSim.logs[key], mode: "lines", name: (computePlotSignalPretty(plotNodeId) || prettyLabelForLogKey(key) || key) }],
+        { title: label, xaxis: { title: "t" }, yaxis: { title: "value" } },
+        { responsive: true }
+      );
+    }
+  }
+
+  document.addEventListener("dblclick", (ev) => {
+    const nodeEl = ev.target && ev.target.closest ? ev.target.closest(".drawflow-node") : null;
+    if (!nodeEl) return;
+    const m = (nodeEl.id || "").match(/^node-(\d+)$/);
+    if (!m) return;
+    const id = parseInt(m[1], 10);
+    const node = editor.getNodeFromId(id);
+    if (node && node.name === "Plot") {
+      openPlotForPlotNode(id);
+    }
+  });
+
+
+// ---- Auto-create a default model on load (Constant -> Integrator) ----
+// ---- Auto-create a default model on load (Constant -> Integrator -> Plot) ----
+try {
+  // vytvoření bloků s pevnými pozicemi
+  const idConst = editor.addNode(
+    "Constant", 0, 1,
+    100, 140,
+    "Constant",
+    { blockType: "Constant", params: { value: 1.0 } },
+    nodeHtml("Constant", { value: 1.0 })
+  );
+
+  const idTF = editor.addNode(
+    "TransferFunction", 1, 1,
+    380, 140,
+    "TransferFunction",
+    { blockType: "TransferFunction", params: { num: "1", den: "1,1" } },
+    nodeHtml("TransferFunction", { num: "1", den: "1,1" })
+  );
+
+  const idPlot = editor.addNode(
+    "Plot", 1, 0,
+    660, 140,
+    "Plot",
+    { blockType: "Plot", params: { label: "" } },
+    nodeHtml("Plot", { label: "" })
+  );
+
+  // ensure titles show Type (ID)
+  refreshNodeHtml(idConst);
+  refreshNodeHtml(idTF);
+  refreshNodeHtml(idPlot);
+
+  // propojení
+  editor.addConnection(idConst, idTF, "output_1", "input_1");
+  editor.addConnection(idTF, idPlot, "output_1", "input_1");
+
+  // Update Plot block text to show full signal origin after wires exist
+  try { refreshNodeHtml(idPlot); } catch (e) {}
+
+  // přepočet drátů (kvůli custom routingu)
+  // Do it twice (next tick + next animation frame) so connection SVG paths definitely exist.
+  setTimeout(() => {
+    updateOrthogonalConnections(true);
+    requestAnimationFrame(() => updateOrthogonalConnections(true));
+  }, 0);
+
+  setStatus("Default model added: Constant → Transfer Function → Plot");
+  console.log("After adding default model:", editor.export());
+
+} catch (e) {
+  setStatus("JS ERROR while auto-adding model: " + e);
+  console.error(e);
+}
+
+
 });
 </script>
 </body>
