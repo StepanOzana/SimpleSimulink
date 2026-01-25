@@ -8,7 +8,7 @@
   <!-- Drawflow (local). Make sure these files exist in ./static/ -->
   <link rel="stylesheet" href="/static/drawflow.min.css">
   <script src="/static/drawflow.min.js"></script>
-  <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
+<script src="/static/plotly-3.3.0.min.js"></script>
 
   <style>
     body { margin: 0; font-family: Arial, sans-serif; }
@@ -122,30 +122,30 @@
       <details class="cat">
         <summary>Sources</summary>
         <div class="toolbar">
-          <button class="blockbtn" onclick="addBlock('Constant')">+ Constant</button>
+          <button class="blockbtn" onclick="addBlock('Constant')" draggable="true" ondragstart="onPaletteDrag(event, \'Constant\')">+ Constant</button>
         </div>
       </details>
 
       <details class="cat">
         <summary>Math</summary>
         <div class="toolbar">
-          <button class="blockbtn" onclick="addBlock('Gain')">+ Gain</button>
-          <button class="blockbtn" onclick="addBlock('Sum')">+ Sum (u1,u2)</button>
+          <button class="blockbtn" onclick="addBlock('Gain')" draggable="true" ondragstart="onPaletteDrag(event, \'Gain\')">+ Gain</button>
+          <button class="blockbtn" onclick="addBlock('Sum')" draggable="true" ondragstart="onPaletteDrag(event, \'Sum\')">+ Sum (u1,u2)</button>
         </div>
       </details>
 
       <details class="cat">
         <summary>Models</summary>
         <div class="toolbar">
-          <button class="blockbtn" onclick="addBlock('TransferFunction')">+ Transfer Function</button>
-          <button class="blockbtn" onclick="addBlock('Integrator')">+ Integrator</button>
+          <button class="blockbtn" onclick="addBlock('TransferFunction')" draggable="true" ondragstart="onPaletteDrag(event, \'TransferFunction\')">+ Transfer Function</button>
+          <button class="blockbtn" onclick="addBlock('Integrator')" draggable="true" ondragstart="onPaletteDrag(event, \'Integrator\')">+ Integrator</button>
         </div>
       </details>
 
       <details class="cat">
         <summary>Sinks</summary>
         <div class="toolbar">
-          <button class="blockbtn" onclick="addBlock('Plot')">+ Plot</button>
+          <button class="blockbtn" onclick="addBlock('Plot')" draggable="true" ondragstart="onPaletteDrag(event, \'Plot\')">+ Plot</button>
         </div>
       </details>
     </div>
@@ -173,7 +173,7 @@
   </div>
 
   <!-- Canvas -->
-  <div id="drawflow" class="drawflow" tabindex="0"></div>
+  <div id="drawflow" class="drawflow" tabindex="0" ondragover="event.preventDefault()" ondrop="onPaletteDrop(event)"></div>
 </div>
 
 <!-- Floating Output Panel (optional, toggle with button/F2) -->
@@ -321,6 +321,12 @@ window.addEventListener("DOMContentLoaded", () => {
     container.addEventListener("touchstart", () => { try { container.focus(); } catch(e) {} }, { passive: true });
   }
   const editor = new Drawflow(container);
+  // Safety net: make default Drawflow paths straight (we still override with our orthogonal router).
+  try {
+    editor.curvature = 0;
+    editor.reroute_curvature_start_end = 0;
+    editor.reroute_curvature = 0;
+  } catch (e) {}
   editor.reroute = true;
   editor.start();
   editor.editor_mode = "edit";
@@ -451,7 +457,7 @@ function nodeHtml(type, params, id) {
   }
 
   // Expose addBlock/exportGraph/simulate globally for onclick handlers
-  window.addBlock = function addBlock(type) {
+  window.addBlock = function addBlock(type, x, y) {
     const spec = BLOCK_LIBRARY[type];
     if (!spec) return alert("Unknown type: " + type);
 
@@ -459,16 +465,13 @@ function nodeHtml(type, params, id) {
     const data = { blockType: type, params };
 
     const inputsCount = spec.inputs.length;
-    const outputsCount = spec.outputs.length;
-
-    const x = 300 + Math.random() * 200;
-    const y = 60 + Math.random() * 200;
-
+    const outputsCount = spec.outputs.length;    const xx = (typeof x === 'number' && Number.isFinite(x)) ? x : (300 + Math.random() * 200);
+    const yy = (typeof y === 'number' && Number.isFinite(y)) ? y : (60 + Math.random() * 200);
     const newId = editor.addNode(
       type,
       inputsCount,
       outputsCount,
-      x, y,
+      xx, yy,
       type,
       data,
       nodeHtml(type, params)
@@ -882,6 +885,26 @@ last: ${data.logs[k].slice(-1)[0]}`;
     const p = new DOMPoint(clientX - preRect.left, clientY - preRect.top).matrixTransform(inv);
     return { x: p.x, y: p.y };
   }
+
+
+  // ===== Drag & drop from palette (left panel) =====
+  window.onPaletteDrag = function onPaletteDrag(ev, type) {
+    try {
+      ev.dataTransfer.setData("text/plain", String(type || ""));
+      ev.dataTransfer.effectAllowed = "copy";
+    } catch (e) {}
+  };
+
+  window.onPaletteDrop = function onPaletteDrop(ev) {
+    ev.preventDefault();
+    let type = "";
+    try { type = ev.dataTransfer.getData("text/plain") || ""; } catch (e) { type = ""; }
+    if (!type) return;
+
+    const pt = screenToCanvas(ev.clientX, ev.clientY);
+    try { window.addBlock(type, pt.x, pt.y); } catch (e) { console.error(e); }
+    try { updateOrthogonalConnections(true); } catch (e) {}
+  };
 
   function portCenterCanvas(portEl) {
     const r = portEl.getBoundingClientRect();
