@@ -110,6 +110,25 @@
     .blockcats details.cat summary::before { content: "▾"; display: inline-block; width: 18px; }
     .blockcats details.cat:not([open]) summary::before { content: "▸"; }
     .blockcats details.cat .toolbar { margin-top: 6px; }
+/* =========================
+   Unified block height (Variant A)
+   ========================= */
+#drawflow .drawflow-node .drawflow_content_node{
+  min-height: 76px;
+  height: 76px;
+}
+
+#drawflow .drawflow-node .drawflow_content_node .df-node{
+  height: 76px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+/* Hide per-block params to keep height uniform */
+#drawflow .drawflow-node .node-params{
+  display: none;
+}
 
 </style>
 </head>
