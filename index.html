@@ -169,6 +169,23 @@
       </details>
     </div>
 <hr>
+    <h3>Schéma</h3>
+
+    <button onclick="saveScheme()">💾 Uložit schéma</button>
+
+    <input
+      type="file"
+      id="loadSchemeInput"
+      accept="application/json"
+      style="display:none"
+      onchange="loadSchemeFromFile(event)"
+    >
+
+    <button onclick="document.getElementById('loadSchemeInput').click()">
+      📂 Otevřít schéma
+    </button>
+
+<hr>
     <h3>Run</h3>
     <div class="kv">
       <label>t0</label><input id="t0" type="number" value="0" step="0.1">
@@ -391,6 +408,65 @@ window.addEventListener("DOMContentLoaded", () => {
   });
 
   setStatus("Editor started.");
+  // =========================
+  // Save / Load scheme (Drawflow export/import)
+  // =========================
+  window.saveScheme = function saveScheme() {
+    try {
+      const data = editor.export();
+      const json = JSON.stringify(data, null, 2);
+      const blob = new Blob([json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "scheme.json";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      alert("Ukládání selhalo: " + e);
+    }
+  };
+
+  window.loadSchemeFromFile = function loadSchemeFromFile(ev) {
+    const file = ev && ev.target ? ev.target.files[0] : null;
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(reader.result);
+
+        // Clear + import UI graph
+        editor.clear();
+        editor.import(data);
+
+        // Reset selection UI
+        selectedNodeId = null;
+        try { renderParamEditor(); } catch (e) {}
+
+        // Recompute orthogonal paths + Plot labels after DOM settles
+        setTimeout(() => {
+          try { updateOrthogonalConnections(true); } catch (e) {}
+          try { refreshAllPlotNodeLabels(); } catch (e) {}
+          // Some Drawflow DOM/SVG appears one tick later
+          requestAnimationFrame(() => {
+            try { updateOrthogonalConnections(true); } catch (e) {}
+          });
+        }, 0);
+      } catch (e) {
+        alert("Nelze načíst schéma: " + e);
+      } finally {
+        // allow loading the same file again
+        try { ev.target.value = ""; } catch (e) {}
+      }
+    };
+    reader.readAsText(file);
+  };
+
 
   let selectedNodeId = null;
 
