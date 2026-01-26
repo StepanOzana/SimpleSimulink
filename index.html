@@ -8,7 +8,7 @@
   <!-- Drawflow (local). Make sure these files exist in ./static/ -->
   <link rel="stylesheet" href="/static/drawflow.min.css">
   <script src="/static/drawflow.min.js"></script>
-<script src="/static/plotly-3.3.0.min.js"></script>
+  <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
 
   <style>
     body { margin: 0; font-family: Arial, sans-serif; }
@@ -17,7 +17,11 @@
     #drawflow { width: 100%; height: 100%; background: #f6f7f9; outline: none; }
     .toolbar button { width: 100%; margin: 6px 0; padding: 10px; cursor: pointer; }
     .blockbtn { text-align: left; }
-    .kv { display: grid; grid-template-columns: 110px 1fr; gap: 8px; margin: 8px 0; }
+    .kv {
+  display: grid;
+  grid-template-columns: 70px 90px;
+  gap: 8px;
+}
     .kv label { font-size: 12px; color: #555; }
     input[type="number"], input[type="text"] { width: 100%; padding: 6px; }
     pre { white-space: pre-wrap; word-break: break-word; background:#111; color:#ddd; padding:10px; border-radius:8px; }
@@ -27,9 +31,49 @@
     .df-node { border-radius: 10px; }
     .node-title { font-weight: bold; margin-bottom: 6px; }
     .node-type { font-size: 12px; color: #666; }
-    .node-params { font-size: 12px; color: #333; margin-top: 8px; }
-  
-    /* --- Port (connector) offset: move circles slightly outside block --- */
+    /* =========================
+   Unified block height + params visible (overlay)
+   ========================= */
+#drawflow .drawflow-node .drawflow_content_node{
+  position: relative;
+  min-height: 76px;
+  height: 76px;
+}
+
+#drawflow .drawflow-node .drawflow_content_node > div{
+  height: 76px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+/* Params inside fixed-height blocks (single-line, no overlap) */
+#drawflow .drawflow-node .drawflow_content_node > div{
+  height: 76px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+}
+
+/* One compact params line at the bottom (does not change block height) */
+#drawflow .drawflow-node .node-params{
+  margin-top: auto;
+  font-size: 11px;
+  line-height: 1.2;
+  color: #333;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none; /* do not block dragging */
+}
+/* Optional: keep title/type in one line so everything fits in fixed height */
+#drawflow .drawflow-node .node-title,
+#drawflow .drawflow-node .node-type{
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* --- Port (connector) offset: move circles slightly outside block --- */
     /* Drawflow renders ports as .input and .output inside .inputs/.outputs. */
 /* INPUT – žlutý – ven z bloku doleva (NEpřepisovat left:) */
 #drawflow.drawflow .drawflow-node .inputs .input{
@@ -110,24 +154,64 @@
     .blockcats details.cat summary::before { content: "▾"; display: inline-block; width: 18px; }
     .blockcats details.cat:not([open]) summary::before { content: "▸"; }
     .blockcats details.cat .toolbar { margin-top: 6px; }
-/* =========================
-   Unified block height (Variant A)
-   ========================= */
-#drawflow .drawflow-node .drawflow_content_node{
-  min-height: 76px;
-  height: 76px;
+
+
+/* === Port arrows (Simulink-like) === */
+#drawflow .drawflow-node .inputs .input::after{
+  content: "▶";
+  font-size: 11px;
+  font-weight: 900;
+  color: #000;
+  position: absolute;
+  left: 52%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
 }
 
-#drawflow .drawflow-node .drawflow_content_node .df-node{
-  height: 76px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
+#drawflow .drawflow-node .outputs .output::after{
+  content: "▶";
+  font-size: 11px;
+  font-weight: 900;
+  color: #000;
+  position: absolute;
+  left: 48%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
 }
 
-/* Hide per-block params to keep height uniform */
-#drawflow .drawflow-node .node-params{
-  display: none;
+/* === Input port color override === */
+#drawflow .drawflow-node .inputs .input{
+  background-color: #f5a3c7 !important; /* light pink */
+  border-color: #d86aa0 !important;
+}
+
+
+/* === Output port color override === */
+#drawflow .drawflow-node .outputs .output{
+  background-color: #9ecbff !important; /* light blue */
+  border-color: #4a90e2 !important;
+}
+
+
+/* === Wire color follows output port color === */
+/* default (fallback) */
+#drawflow .connection path {
+  stroke: #4a90e2;
+  stroke-width: 2.2px;
+}
+
+/* when starting from output (Drawflow adds node_out_*) */
+#drawflow .connection[class*="node_out"] path {
+  stroke: #4a90e2; /* same as output port */
+}
+
+
+/* === Hover highlight for all wires connected to a port === */
+#drawflow .connection.is-highlight path{
+  stroke-width: 3.6px !important;
+  filter: drop-shadow(0 0 2px rgba(0,0,0,0.35));
 }
 
 </style>
@@ -141,49 +225,38 @@
       <details class="cat">
         <summary>Sources</summary>
         <div class="toolbar">
-          <button class="blockbtn" onclick="addBlock('Constant')" draggable="true" ondragstart="onPaletteDrag(event, \'Constant\')">+ Constant</button>
+          <button class="blockbtn" onclick="addBlock('Constant')">+ Constant</button>
         </div>
       </details>
 
       <details class="cat">
         <summary>Math</summary>
         <div class="toolbar">
-          <button class="blockbtn" onclick="addBlock('Gain')" draggable="true" ondragstart="onPaletteDrag(event, \'Gain\')">+ Gain</button>
-          <button class="blockbtn" onclick="addBlock('Sum')" draggable="true" ondragstart="onPaletteDrag(event, \'Sum\')">+ Sum (u1,u2)</button>
+          <button class="blockbtn" onclick="addBlock('Gain')">+ Gain</button>
+          <button class="blockbtn" onclick="addBlock('Sum')">+ Sum (u1,u2)</button>
         </div>
       </details>
 
       <details class="cat">
         <summary>Models</summary>
         <div class="toolbar">
-          <button class="blockbtn" onclick="addBlock('TransferFunction')" draggable="true" ondragstart="onPaletteDrag(event, \'TransferFunction\')">+ Transfer Function</button>
-          <button class="blockbtn" onclick="addBlock('Integrator')" draggable="true" ondragstart="onPaletteDrag(event, \'Integrator\')">+ Integrator</button>
+          <button class="blockbtn" onclick="addBlock('TransferFunction')">+ Transfer Function</button>
+          <button class="blockbtn" onclick="addBlock('Integrator')">+ Integrator</button>
         </div>
       </details>
 
       <details class="cat">
         <summary>Sinks</summary>
         <div class="toolbar">
-          <button class="blockbtn" onclick="addBlock('Plot')" draggable="true" ondragstart="onPaletteDrag(event, \'Plot\')">+ Plot</button>
+          <button class="blockbtn" onclick="addBlock('Plot')">+ Plot</button>
         </div>
       </details>
     </div>
 <hr>
     <h3>Schéma</h3>
-
     <button onclick="saveScheme()">💾 Uložit schéma</button>
-
-    <input
-      type="file"
-      id="loadSchemeInput"
-      accept="application/json"
-      style="display:none"
-      onchange="loadSchemeFromFile(event)"
-    >
-
-    <button onclick="document.getElementById('loadSchemeInput').click()">
-      📂 Otevřít schéma
-    </button>
+    <input type="file" id="loadSchemeInput" accept="application/json" style="display:none" onchange="loadSchemeFromFile(event)">
+    <button onclick="document.getElementById('loadSchemeInput').click()">📂 Otevřít schéma</button>
 
 <hr>
     <h3>Run</h3>
@@ -209,7 +282,7 @@
   </div>
 
   <!-- Canvas -->
-  <div id="drawflow" class="drawflow" tabindex="0" ondragover="event.preventDefault()" ondrop="onPaletteDrop(event)"></div>
+  <div id="drawflow" class="drawflow" tabindex="0"></div>
 </div>
 
 <!-- Floating Output Panel (optional, toggle with button/F2) -->
@@ -339,12 +412,12 @@ window.addEventListener("DOMContentLoaded", () => {
 
   // ---- Block library: ports + default params ----
   const BLOCK_LIBRARY = {
-    Constant:   { inputs: [], outputs: ["y"], defaultParams: { value: 1.0 } },
-    Gain:       { inputs: ["u"], outputs: ["y"], defaultParams: { k: 1.0 } },
-    Sum:        { inputs: ["u1","u2"], outputs: ["y"], defaultParams: { signs: "++" } },
-    Integrator: { inputs: ["u"], outputs: ["y"], defaultParams: { x0: 0.0 } },
-    Plot:       { inputs: ["u"], outputs: [], defaultParams: { label: "" } },
-    TransferFunction: { inputs: ["u"], outputs: ["y"], defaultParams: { num: "1", den: "1,1" } },
+    Constant:   { inputs: [], outputs: ["y"], defaultParams: { value: 1.0 }, desc: "constant source" },
+    Gain:       { inputs: ["u"], outputs: ["y"], defaultParams: { k: 1.0 }, desc: "multiply input" },
+    Sum:        { inputs: ["u1","u2"], outputs: ["y"], defaultParams: { signs: "++" }, desc: "sum inputs" },
+    Integrator: { inputs: ["u"], outputs: ["y"], defaultParams: { x0: 0.0 }, desc: "∫ u dt" },
+    Plot:       { inputs: ["u"], outputs: [], defaultParams: { label: "" }, desc: "signal scope" },
+    TransferFunction: { inputs: ["u"], outputs: ["y"], defaultParams: { num: "1", den: "1,1" }, desc: "continuous LTI system" },
   };
 
   // ---- Create Drawflow editor ----
@@ -357,15 +430,47 @@ window.addEventListener("DOMContentLoaded", () => {
     container.addEventListener("touchstart", () => { try { container.focus(); } catch(e) {} }, { passive: true });
   }
   const editor = new Drawflow(container);
-  // Safety net: make default Drawflow paths straight (we still override with our orthogonal router).
-  try {
-    editor.curvature = 0;
-    editor.reroute_curvature_start_end = 0;
-    editor.reroute_curvature = 0;
-  } catch (e) {}
   editor.reroute = true;
   editor.start();
   editor.editor_mode = "edit";
+
+  // ===== Save/Load scheme (Drawflow export/import) =====
+  window.saveScheme = function saveScheme() {
+    const data = editor.export();
+    const json = JSON.stringify(data, null, 2);
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "scheme.json";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  window.loadSchemeFromFile = function loadSchemeFromFile(ev) {
+    const file = ev && ev.target ? ev.target.files[0] : null;
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(reader.result);
+        editor.clear();
+        editor.import(data);
+
+        // If you have custom routing/plot label refresh functions, call them if present.
+        setTimeout(() => {
+          try { if (typeof updateOrthogonalConnections === "function") updateOrthogonalConnections(true); } catch (e) {}
+          try { if (typeof refreshAllPlotNodeLabels === "function") refreshAllPlotNodeLabels(); } catch (e) {}
+        }, 0);
+      } catch (e) {
+        alert("Nelze načíst schéma: " + e);
+      }
+    };
+    reader.readAsText(file);
+    ev.target.value = "";
+  };
 
   // --- Helpers for block rotation (Ctrl+R) ---
   function getRotationDeg(nodeId) {
@@ -408,65 +513,6 @@ window.addEventListener("DOMContentLoaded", () => {
   });
 
   setStatus("Editor started.");
-  // =========================
-  // Save / Load scheme (Drawflow export/import)
-  // =========================
-  window.saveScheme = function saveScheme() {
-    try {
-      const data = editor.export();
-      const json = JSON.stringify(data, null, 2);
-      const blob = new Blob([json], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "scheme.json";
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-
-      URL.revokeObjectURL(url);
-    } catch (e) {
-      alert("Ukládání selhalo: " + e);
-    }
-  };
-
-  window.loadSchemeFromFile = function loadSchemeFromFile(ev) {
-    const file = ev && ev.target ? ev.target.files[0] : null;
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const data = JSON.parse(reader.result);
-
-        // Clear + import UI graph
-        editor.clear();
-        editor.import(data);
-
-        // Reset selection UI
-        selectedNodeId = null;
-        try { renderParamEditor(); } catch (e) {}
-
-        // Recompute orthogonal paths + Plot labels after DOM settles
-        setTimeout(() => {
-          try { updateOrthogonalConnections(true); } catch (e) {}
-          try { refreshAllPlotNodeLabels(); } catch (e) {}
-          // Some Drawflow DOM/SVG appears one tick later
-          requestAnimationFrame(() => {
-            try { updateOrthogonalConnections(true); } catch (e) {}
-          });
-        }, 0);
-      } catch (e) {
-        alert("Nelze načíst schéma: " + e);
-      } finally {
-        // allow loading the same file again
-        try { ev.target.value = ""; } catch (e) {}
-      }
-    };
-    reader.readAsText(file);
-  };
-
 
   let selectedNodeId = null;
 
@@ -484,33 +530,83 @@ window.addEventListener("DOMContentLoaded", () => {
     return SHORT_NAMES[type] || type;
   }
 
+
+  function isDefaultValue(a, b) {
+    // numbers with tolerance, otherwise strict-ish string compare
+    if (typeof a === "number" || typeof b === "number") {
+      const na = Number(a), nb = Number(b);
+      if (!Number.isFinite(na) || !Number.isFinite(nb)) return String(a) === String(b);
+      return Math.abs(na - nb) <= 1e-12;
+    }
+    return String(a ?? "").trim() === String(b ?? "").trim();
+  }
+
+  function formatParamsLine(type, params, meta) {
+    const spec = BLOCK_LIBRARY[type] || {};
+    const defaults = spec.defaultParams || {};
+
+    // Plot: show single compact line, prefer user label if set, always include signal if connected.
+    if (type === "Plot") {
+      const sig = (meta && meta.signalPretty) ? String(meta.signalPretty) : "";
+      const lbl = (params && typeof params.label === "string") ? params.label.trim() : "";
+      if (lbl && sig && lbl !== sig) return `${lbl} — ${sig}`;
+      if (lbl) return lbl;
+      if (sig) return sig;
+      return "(not connected)";
+    }
+
+    // Pretty single-line formats for common blocks
+    if (type === "Constant") {
+      const v = (params && params.value !== undefined) ? params.value : defaults.value;
+      return `value=${v}`;
+    }
+    if (type === "Gain") {
+      const k = (params && params.k !== undefined) ? params.k : defaults.k;
+      return `k=${k}`;
+    }
+    if (type === "Sum") {
+      const s = (params && params.signs !== undefined) ? params.signs : defaults.signs;
+      return `signs=${s}`;
+    }
+    if (type === "Integrator") {
+      const x0 = (params && params.x0 !== undefined) ? params.x0 : defaults.x0;
+      return `x0=${x0}`;
+    }
+    if (type === "TransferFunction") {
+      const num = (params && params.num !== undefined) ? params.num : defaults.num;
+      const den = (params && params.den !== undefined) ? params.den : defaults.den;
+      return `num=${num}, den=${den}`;
+    }
+
+    // Fallback: show all default keys (stable layout, always informative)
+    const parts = [];
+    for (const k of Object.keys(defaults)) {
+      const cur = (params && params[k] !== undefined) ? params[k] : defaults[k];
+      parts.push(`${k}=${cur}`);
+    }
+    return parts.join(", ");
+  }
 function nodeHtml(type, params, id) {
         const shown = shortTypeName(type);
     const title = (id !== undefined && id !== null && String(id).length) ? `${shown} (${id})` : shown;
 
+    const desc = (BLOCK_LIBRARY[type] && typeof BLOCK_LIBRARY[type].desc === 'string') ? BLOCK_LIBRARY[type].desc : '';
 
-    // For Plot blocks, show a human-friendly signal origin (type+ID+port), not just a raw key like "2.y".
+    // Build one compact params line (always).
+    let sigPretty = "";
     if (type === "Plot") {
-      const sig = (params && typeof params.__signalPretty === "string" && params.__signalPretty.trim())
+      sigPretty = (params && typeof params.__signalPretty === "string" && params.__signalPretty.trim())
         ? params.__signalPretty.trim()
-        : "(not connected)";
-      const lbl = (params && typeof params.label === "string" && params.label.trim()) ? params.label.trim() : "";
-      return `
-        <div>
-          <div class="node-title">${title}</div>
-          <div class="node-type">scope</div>
-          ${lbl ? `<div class="node-params"><b>Label</b>: ${escapeHtml(lbl)}</div>` : ""}
-          <div class="node-params"><b>Signal</b>: ${escapeHtml(sig)}</div>
-        </div>
-      `;
+        : "";
     }
 
-    const p = JSON.stringify(params);
+    const paramsLine = formatParamsLine(type, params, { signalPretty: sigPretty });
+
     return `
       <div>
         <div class="node-title">${title}</div>
-        <div class="node-type">ports from library</div>
-        <div class="node-params"><b>params</b>: ${escapeHtml(p)}</div>
+        ${desc ? `<div class="node-type">${escapeHtml(desc)}</div>` : ""}
+        ${paramsLine ? `<div class="node-params">${escapeHtml(paramsLine)}</div>` : ""}
       </div>
     `;
   }
@@ -552,7 +648,7 @@ function nodeHtml(type, params, id) {
   }
 
   // Expose addBlock/exportGraph/simulate globally for onclick handlers
-  window.addBlock = function addBlock(type, x, y) {
+  window.addBlock = function addBlock(type) {
     const spec = BLOCK_LIBRARY[type];
     if (!spec) return alert("Unknown type: " + type);
 
@@ -560,13 +656,16 @@ function nodeHtml(type, params, id) {
     const data = { blockType: type, params };
 
     const inputsCount = spec.inputs.length;
-    const outputsCount = spec.outputs.length;    const xx = (typeof x === 'number' && Number.isFinite(x)) ? x : (300 + Math.random() * 200);
-    const yy = (typeof y === 'number' && Number.isFinite(y)) ? y : (60 + Math.random() * 200);
+    const outputsCount = spec.outputs.length;
+
+    const x = 300 + Math.random() * 200;
+    const y = 60 + Math.random() * 200;
+
     const newId = editor.addNode(
       type,
       inputsCount,
       outputsCount,
-      xx, yy,
+      x, y,
       type,
       data,
       nodeHtml(type, params)
@@ -981,26 +1080,6 @@ last: ${data.logs[k].slice(-1)[0]}`;
     return { x: p.x, y: p.y };
   }
 
-
-  // ===== Drag & drop from palette (left panel) =====
-  window.onPaletteDrag = function onPaletteDrag(ev, type) {
-    try {
-      ev.dataTransfer.setData("text/plain", String(type || ""));
-      ev.dataTransfer.effectAllowed = "copy";
-    } catch (e) {}
-  };
-
-  window.onPaletteDrop = function onPaletteDrop(ev) {
-    ev.preventDefault();
-    let type = "";
-    try { type = ev.dataTransfer.getData("text/plain") || ""; } catch (e) { type = ""; }
-    if (!type) return;
-
-    const pt = screenToCanvas(ev.clientX, ev.clientY);
-    try { window.addBlock(type, pt.x, pt.y); } catch (e) { console.error(e); }
-    try { updateOrthogonalConnections(true); } catch (e) {}
-  };
-
   function portCenterCanvas(portEl) {
     const r = portEl.getBoundingClientRect();
     return screenToCanvas(r.left + r.width / 2, r.top + r.height / 2);
@@ -1355,7 +1434,86 @@ try {
   console.error(e);
 }
 
+  // ===== Hover highlight: hovering a port OR wire highlights connected wires =====
+  (function setupPortHoverHighlight(){
+    const root = document.getElementById("drawflow");
+    if (!root) return;
 
+    let highlighted = [];
+
+    function clearHighlight(){
+      highlighted.forEach(el => el.classList.remove("is-highlight"));
+      highlighted = [];
+    }
+
+    function addHighlight(conns){
+      clearHighlight();
+      conns.forEach(el => el.classList.add("is-highlight"));
+      highlighted = conns;
+    }
+
+    function connectionsForPort(portEl){
+      const nodeEl = portEl.closest(".drawflow-node");
+      if (!nodeEl) return [];
+      const m = (nodeEl.id || "").match(/^node-(\d+)$/);
+      if (!m) return [];
+      const nodeId = m[1];
+
+      const isOut = portEl.classList.contains("output");
+      const key = isOut ? (portEl.getAttribute("data-output") || "") : (portEl.getAttribute("data-input") || "");
+      if (!key) return [];
+
+      const conns = Array.from(document.querySelectorAll("#drawflow .connection")).filter(c => {
+        const no = c.getAttribute("data-node_out");
+        const ni = c.getAttribute("data-node_in");
+        const o  = c.getAttribute("data-output");
+        const i  = c.getAttribute("data-input");
+        return isOut
+          ? (no === nodeId && o === key)
+          : (ni === nodeId && i === key);
+      });
+
+      return conns;
+    }
+
+    function highlightPort(portEl){
+      const conns = connectionsForPort(portEl);
+      if (conns.length) addHighlight(conns);
+      else clearHighlight();
+    }
+
+    function highlightWire(connEl){
+      if (!connEl) return;
+      addHighlight([connEl]);
+    }
+
+    // Hover on ports and wires
+    root.addEventListener("pointerover", (ev) => {
+      const port = ev.target && ev.target.closest ? ev.target.closest(".output, .input") : null;
+      if (port) {
+        highlightPort(port);
+        return;
+      }
+      const conn = ev.target && ev.target.closest ? ev.target.closest(".connection") : null;
+      if (conn) {
+        highlightWire(conn);
+        return;
+      }
+    });
+
+    root.addEventListener("pointerout", (ev) => {
+      const stillOn = ev.relatedTarget && ev.relatedTarget.closest ? ev.relatedTarget.closest(".output, .input, .connection") : null;
+      if (stillOn) return;
+      clearHighlight();
+    });
+
+    // Clear on interactions that may leave stale highlights
+    root.addEventListener("mousedown", clearHighlight);
+    root.addEventListener("wheel", clearHighlight, { passive: true });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") clearHighlight();
+    });
+  })();
 });
 </script>
 </body>
