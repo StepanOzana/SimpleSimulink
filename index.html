@@ -16,7 +16,7 @@
     body { margin: 0; font-family: Arial, sans-serif; }
     .layout { display: grid; grid-template-columns: 260px 1fr; height: 100vh; }
     .panel { border-right: 1px solid #ddd; padding: 12px; overflow: auto; }
-    #paperWrap { width: 100%; height: 100%; background: #f6f7f9; outline: none; position: relative; }
+    #paperWrap { width: 100%; height: 100%; background: #f6f7f9; outline: none; position: relative;  box-sizing: border-box; }
     .toolbar button { width: 100%; margin: 6px 0; padding: 10px; cursor: pointer; }
     .blockbtn { text-align: left; }
     .kv { display: grid; grid-template-columns: 70px 90px; gap: 8px; }
@@ -182,7 +182,7 @@
     <button id="toggleOutputBtn" style="margin-top:10px;" onclick="toggleOutput()">Show Output (F2)</button>
 
     <p class="hint">
-      Tip: Klikni na blok pro editaci parametrů vlevo. Propoj porty tažením z výstupu do vstupu.
+      Tip: Klikni na blok pro editaci parametrů vlevo. Propoj porty tažením z výstupu do vstupu. Dvojklik na drát přidá zlom (vertex), který lze táhnout. Navíc: můžeš chytnout drát kdekoliv a tahem vytvořit/posunout zlom.
       <br><br>
       MVP pravidla: 1 drát na 1 vstup. Žádné čistě algebraické cykly.
     </p>
@@ -339,7 +339,40 @@ window.addEventListener('DOMContentLoaded', () => {
   const namespace = joint.shapes;
   const graph = new joint.dia.Graph({}, { cellNamespace: namespace });
 
-  const wrap = document.getElementById('paperWrap');
+  
+
+  // ===== Delete key: remove selected link or selected block (and its connected links) =====
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+
+    // Don't hijack Delete/Backspace while typing in inputs/textareas or editable elements.
+    const ae = document.activeElement;
+    if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
+
+    // Prefer deleting selected link if any
+    if (typeof selectedLinkId !== 'undefined' && selectedLinkId) {
+      const l = graph.getCell(selectedLinkId);
+      if (l) l.remove();
+      if (typeof setSelectedLink === 'function') setSelectedLink(null);
+      e.preventDefault();
+      return;
+    }
+
+    // Delete selected node if any
+    if (typeof selectedNodeId !== 'undefined' && selectedNodeId) {
+      const el = graph.getCell(selectedNodeId);
+      if (el) {
+        // Remove all links connected to the element, then the element
+        const links = graph.getConnectedLinks(el);
+        links.forEach(link => link.remove());
+        el.remove();
+      }
+      selectedNodeId = null;
+      if (typeof renderParamEditor === 'function') renderParamEditor();
+      e.preventDefault();
+    }
+  }, true);
+const wrap = document.getElementById('paperWrap');
   const paper = new joint.dia.Paper({
     el: wrap,
     model: graph,
@@ -357,13 +390,36 @@ window.addEventListener('DOMContentLoaded', () => {
           targetMarker: { type: 'path', d: 'M 10 -5 0 0 10 5 z' }
         }
       });
-      l.router('manhattan', { step: 20, padding: 12 });
+      
+  // ===== UX: Pan the whole diagram by dragging on blank space =====
+  // Dragging on empty canvas will translate the paper (does not affect element dragging).
+  let __panning = false;
+  let __panStartClient = { x: 0, y: 0 };
+  let __panStartTranslate = { x: 0, y: 0 };
+
+  paper.on('blank:pointerdown', (evt) => {
+    __panning = true;
+    __panStartClient = { x: evt.clientX, y: evt.clientY };
+    const t = paper.translate();
+    __panStartTranslate = { x: t.tx || 0, y: t.ty || 0 };
+    evt.preventDefault();
+  });
+
+  paper.on('blank:pointermove', (evt) => {
+    if (!__panning) return;
+    const dx = evt.clientX - __panStartClient.x;
+    const dy = evt.clientY - __panStartClient.y;
+    paper.translate(__panStartTranslate.x + dx, __panStartTranslate.y + dy);
+  });
+
+  paper.on('blank:pointerup', () => { __panning = false; });
+l.router('manhattan', { step: 20, padding: 12 });
       l.connector('rounded', { radius: 8 });
       return l;
     },
     interactive: function(cellView) {
       // allow moving elements and manipulating links
-      if (cellView.model.isLink()) return { vertexAdd: false };
+      if (cellView.model.isLink()) return { vertexAdd: true, vertexMove: true, vertexRemove: true };
       return true;
     },
     linkPinning: false,
@@ -397,13 +453,20 @@ window.addEventListener('DOMContentLoaded', () => {
 
 
   function fitPaper() {
-    const r = wrap.getBoundingClientRect();
-    paper.setDimensions(r.width, r.height);
+    // Force paper to occupy the full remaining right side (window width minus left panel).
+    const panel = document.querySelector('.panel');
+    const leftW = panel ? panel.getBoundingClientRect().width : 260;
+    const w = Math.max(200, window.innerWidth - leftW);
+    const h = Math.max(200, window.innerHeight);
+    // Ensure the wrapper itself is sized deterministically
+    wrap.style.width = w + 'px';
+    wrap.style.height = h + 'px';
+    paper.setDimensions(w, h);
   }
   window.addEventListener('resize', fitPaper);
-  fitPaper();
-
-  // ===== Ports config =====
+  setTimeout(() => fitPaper(), 0);
+  requestAnimationFrame(() => fitPaper());
+// ===== Ports config =====
   const PORT_MARKUP = [
     // Larger invisible hit area so the user can reliably start a connection
     { tagName: 'circle', selector: 'portHit', attributes: { r: 7, fill: 'none', stroke: 'transparent', 'stroke-width': 18, 'pointer-events': 'stroke', class: 'joint-port-hit' } },
@@ -649,7 +712,7 @@ window.addEventListener('DOMContentLoaded', () => {
     selectedNodeId = String(elementView.model.id);
     renderParamEditor();
   });
-  paper.on('blank:pointerdown', () => {
+  paper.on('blank:pointerclick', () => {
     selectedNodeId = null;
     renderParamEditor();
   });
@@ -715,6 +778,67 @@ window.addEventListener('DOMContentLoaded', () => {
 
   // ===== Hover highlight (ports OR links) + click selection for links =====
   let selectedLinkId = null;
+
+  // ===== Variant B: Drag wire segment anywhere (auto-creates/moves a vertex) =====
+  // How it works:
+  // - Mousedown on a link path creates a vertex at the cursor (or picks a nearby one)
+  // - Mousemove updates that vertex position
+  // - Mouseup ends the drag
+  let __wireDrag = null; // { linkId, vIndex }
+  const __WIRE_VERTEX_PICK_PX = 14;
+
+  function __findNearestVertexIndex(link, pLocal) {
+    const vs = link.vertices() || [];
+    if (!vs.length) return -1;
+    let best = -1;
+    let bestD2 = Infinity;
+    for (let i = 0; i < vs.length; i++) {
+      const dx = vs[i].x - pLocal.x;
+      const dy = vs[i].y - pLocal.y;
+      const d2 = dx*dx + dy*dy;
+      if (d2 < bestD2) { bestD2 = d2; best = i; }
+    }
+    return (Math.sqrt(bestD2) <= __WIRE_VERTEX_PICK_PX) ? best : -1;
+  }
+
+  paper.on('link:pointerdown', (linkView, evt) => {
+    // Only start "segment drag" when clicking on the visible link path, not on tools/handles.
+    const isPath = evt && evt.target && (evt.target.tagName === 'path' || evt.target.closest && evt.target.closest('path'));
+    if (!isPath) return;
+
+    const link = linkView.model;
+    const p = paper.clientToLocalPoint({ x: evt.clientX, y: evt.clientY });
+
+    let idx = __findNearestVertexIndex(link, p);
+    if (idx < 0) {
+      // Create new vertex at cursor position
+      const vs = link.vertices() || [];
+      vs.push({ x: p.x, y: p.y });
+      link.vertices(vs);
+      idx = vs.length - 1;
+    }
+
+    __wireDrag = { linkId: String(link.id), vIndex: idx };
+    evt.preventDefault();
+    evt.stopPropagation();
+  });
+
+  paper.on('blank:pointerup', () => { __wireDrag = null; });
+  paper.on('link:pointerup', () => { __wireDrag = null; });
+
+  paper.on('blank:pointermove', (evt) => {
+    if (!__wireDrag) return;
+    const link = graph.getCell(__wireDrag.linkId);
+    if (!link) { __wireDrag = null; return; }
+    const p = paper.clientToLocalPoint({ x: evt.clientX, y: evt.clientY });
+    const vs = link.vertices() || [];
+    if (__wireDrag.vIndex >= 0 && __wireDrag.vIndex < vs.length) {
+      vs[__wireDrag.vIndex] = { x: p.x, y: p.y };
+      link.vertices(vs);
+    }
+    evt.preventDefault();
+  });
+
   const hoverLinks = new Set();
 
   function clearHover() {
@@ -760,7 +884,7 @@ window.addEventListener('DOMContentLoaded', () => {
   paper.on('link:pointerdown', (linkView) => {
     setSelectedLink(linkView.model);
   });
-  paper.on('blank:pointerdown', () => {
+  paper.on('blank:pointerclick', () => {
     setSelectedLink(null);
     clearHover();
   });
