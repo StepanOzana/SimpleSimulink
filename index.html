@@ -3,98 +3,29 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Simulink-lite (Plain HTML) - Drawflow</title>
+  <title>Simulink-lite (Plain HTML) - JointJS</title>
 
-  <!-- Drawflow (local). Make sure these files exist in ./static/ -->
-  <link rel="stylesheet" href="/static/drawflow.min.css">
-  <script src="/static/drawflow.min.js"></script>
-  <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
+  <!-- JointJS (UMD, no build step) -->
+  <link rel="stylesheet" href="/static/joint.css">
+  <script src="/static/joint.js"></script>
+
+  <!-- Plotly (kept as in your Drawflow version) -->
+  <script src="/static/plotly-3.3.0.min.js"></script>
 
   <style>
     body { margin: 0; font-family: Arial, sans-serif; }
     .layout { display: grid; grid-template-columns: 260px 1fr; height: 100vh; }
     .panel { border-right: 1px solid #ddd; padding: 12px; overflow: auto; }
-    #drawflow { width: 100%; height: 100%; background: #f6f7f9; outline: none; }
+    #paperWrap { width: 100%; height: 100%; background: #f6f7f9; outline: none; position: relative; }
     .toolbar button { width: 100%; margin: 6px 0; padding: 10px; cursor: pointer; }
     .blockbtn { text-align: left; }
-    .kv {
-  display: grid;
-  grid-template-columns: 70px 90px;
-  gap: 8px;
-}
+    .kv { display: grid; grid-template-columns: 70px 90px; gap: 8px; }
     .kv label { font-size: 12px; color: #555; }
     input[type="number"], input[type="text"] { width: 100%; padding: 6px; }
     pre { white-space: pre-wrap; word-break: break-word; background:#111; color:#ddd; padding:10px; border-radius:8px; }
     .hint { font-size: 12px; color:#666; line-height: 1.4; }
 
-    /* Simple node styling */
-    .df-node { border-radius: 10px; }
-    .node-title { font-weight: bold; margin-bottom: 6px; }
-    .node-type { font-size: 12px; color: #666; }
-    /* =========================
-   Unified block height + params visible (overlay)
-   ========================= */
-#drawflow .drawflow-node .drawflow_content_node{
-  position: relative;
-  min-height: 76px;
-  height: 76px;
-}
-
-#drawflow .drawflow-node .drawflow_content_node > div{
-  height: 76px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-}
-
-/* Params inside fixed-height blocks (single-line, no overlap) */
-#drawflow .drawflow-node .drawflow_content_node > div{
-  height: 76px;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-start;
-}
-
-/* One compact params line at the bottom (does not change block height) */
-#drawflow .drawflow-node .node-params{
-  margin-top: auto;
-  font-size: 11px;
-  line-height: 1.2;
-  color: #333;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  pointer-events: none; /* do not block dragging */
-}
-/* Optional: keep title/type in one line so everything fits in fixed height */
-#drawflow .drawflow-node .node-title,
-#drawflow .drawflow-node .node-type{
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-/* --- Port (connector) offset: move circles slightly outside block --- */
-    /* Drawflow renders ports as .input and .output inside .inputs/.outputs. */
-/* INPUT – žlutý – ven z bloku doleva (NEpřepisovat left:) */
-#drawflow.drawflow .drawflow-node .inputs .input{
-  transform: translateX(-12px) !important;
-  z-index: 20;
-}
-
-/* OUTPUT – bílý – ven z bloku doprava (NEpřepisovat right:) */
-#drawflow.drawflow .drawflow-node .outputs .output{
-  transform: translateX(12px) !important;
-  z-index: 20;
-}
-
-    /* Ensure ports stay clickable/visible above wires and node body */
-    #drawflow .drawflow-node .inputs .input,
-    #drawflow .drawflow-node .outputs .output {
-      z-index: 5;
-    }
-
-  
-    /* ===== Floating panels (Output + Plot) ===== */
+    /* Floating panels (Output + Plot) */
     .floating-panel {
       position: fixed;
       top: 60px;
@@ -146,7 +77,7 @@
 
     /* Left panel selection editor */
     .section-title{ margin: 14px 0 8px; font-size: 14px; font-weight: 800; }
-  
+
     /* Collapsible block categories */
     .blockcats details.cat { margin: 6px 0; }
     .blockcats details.cat summary { cursor: pointer; user-select: none; font-weight: 600; }
@@ -155,63 +86,36 @@
     .blockcats details.cat:not([open]) summary::before { content: "▸"; }
     .blockcats details.cat .toolbar { margin-top: 6px; }
 
+    /* JointJS paper tweaks */
+    #paperWrap .joint-paper { background: transparent !important; }
+    /* Make ports sit above links */
+    .joint-port-body { pointer-events: all; }
 
-/* === Port arrows (Simulink-like) === */
-#drawflow .drawflow-node .inputs .input::after{
-  content: "▶";
-  font-size: 11px;
-  font-weight: 900;
-  color: #000;
-  position: absolute;
-  left: 52%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  pointer-events: none;
+  
+/* === UX: small crosshair cursor on ports / nodes === */
+.joint-port,
+.joint-port * {
+    cursor: crosshair !important;
 }
 
-#drawflow .drawflow-node .outputs .output::after{
-  content: "▶";
-  font-size: 11px;
-  font-weight: 900;
-  color: #000;
-  position: absolute;
-  left: 48%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  pointer-events: none;
+.joint-element {
+    cursor: default;
 }
 
-/* === Input port color override === */
-#drawflow .drawflow-node .inputs .input{
-  background-color: #f5a3c7 !important; /* light pink */
-  border-color: #d86aa0 !important;
+.joint-element .joint-port {
+    cursor: crosshair;
 }
 
 
-/* === Output port color override === */
-#drawflow .drawflow-node .outputs .output{
-  background-color: #9ecbff !important; /* light blue */
-  border-color: #4a90e2 !important;
-}
+/* Ensure the larger invisible port hit area can capture pointer events */
+.joint-port-hit { pointer-events: all; }
 
 
-/* === Wire color follows output port color === */
-/* default (fallback) */
-#drawflow .connection path {
-  stroke: #4a90e2;
-  stroke-width: 2.2px;
-}
-
-/* when starting from output (Drawflow adds node_out_*) */
-#drawflow .connection[class*="node_out"] path {
-  stroke: #4a90e2; /* same as output port */
-}
-
-
-/* === Hover highlight for all wires connected to a port === */
-#drawflow .connection.is-highlight path{
-  stroke-width: 3.6px !important;
-  filter: drop-shadow(0 0 2px rgba(0,0,0,0.35));
+/* Keep port hit-ring invisible even when JointJS applies magnet highlighting */
+.joint-port-hit,
+.joint-port-hit * {
+    stroke: transparent !important;
+    fill: none !important;
 }
 
 </style>
@@ -252,13 +156,16 @@
         </div>
       </details>
     </div>
-<hr>
+
+    <hr>
+
     <h3>Schéma</h3>
     <button onclick="saveScheme()">💾 Uložit schéma</button>
     <input type="file" id="loadSchemeInput" accept="application/json" style="display:none" onchange="loadSchemeFromFile(event)">
     <button onclick="document.getElementById('loadSchemeInput').click()">📂 Otevřít schéma</button>
 
-<hr>
+    <hr>
+
     <h3>Run</h3>
     <div class="kv">
       <label>t0</label><input id="t0" type="number" value="0" step="0.1">
@@ -275,17 +182,17 @@
     <button id="toggleOutputBtn" style="margin-top:10px;" onclick="toggleOutput()">Show Output (F2)</button>
 
     <p class="hint">
-      Tip: Klikni na blok pro editaci parametrů vpravo. Propoj porty tažením z výstupu do vstupu.
+      Tip: Klikni na blok pro editaci parametrů vlevo. Propoj porty tažením z výstupu do vstupu.
       <br><br>
       MVP pravidla: 1 drát na 1 vstup. Žádné čistě algebraické cykly.
     </p>
   </div>
 
   <!-- Canvas -->
-  <div id="drawflow" class="drawflow" tabindex="0"></div>
+  <div id="paperWrap" tabindex="0"></div>
 </div>
 
-<!-- Floating Output Panel (optional, toggle with button/F2) -->
+<!-- Floating Output Panel (toggle with button/F2) -->
 <div id="outputWindow" class="floating-panel" aria-hidden="true">
   <div class="fp-header" id="outputHeader">
     <span>Output</span>
@@ -317,31 +224,30 @@
 </div>
 
 <script>
-
-window.addEventListener("DOMContentLoaded", () => {
-  const jsStatusEl = document.getElementById("jsStatus");
+window.addEventListener('DOMContentLoaded', () => {
+  const jsStatusEl = document.getElementById('jsStatus');
   const setStatus = (t) => { if (jsStatusEl) jsStatusEl.textContent = t; };
+
   // ===== Floating window helpers =====
   function toggleOutput(force) {
-    const w = document.getElementById("outputWindow");
-    const btn = document.getElementById("toggleOutputBtn");
+    const w = document.getElementById('outputWindow');
+    const btn = document.getElementById('toggleOutputBtn');
     if (!w) return;
-    const show = (typeof force === "boolean") ? force : !w.classList.contains("show");
-    w.classList.toggle("show", show);
-    w.setAttribute("aria-hidden", show ? "false" : "true");
-    if (btn) btn.textContent = show ? "Hide Output (F2)" : "Show Output (F2)";
+    const show = (typeof force === 'boolean') ? force : !w.classList.contains('show');
+    w.classList.toggle('show', show);
+    w.setAttribute('aria-hidden', show ? 'false' : 'true');
+    if (btn) btn.textContent = show ? 'Hide Output (F2)' : 'Show Output (F2)';
   }
 
   function togglePlotWindow(force) {
-    const w = document.getElementById("plotWindow");
+    const w = document.getElementById('plotWindow');
     if (!w) return;
-    const show = (typeof force === "boolean") ? force : !w.classList.contains("show");
-    w.classList.toggle("show", show);
-    w.setAttribute("aria-hidden", show ? "false" : "true");
-    if (!show && typeof Plotly !== "undefined") { try { Plotly.purge("plotCanvas"); } catch(e){} }
+    const show = (typeof force === 'boolean') ? force : !w.classList.contains('show');
+    w.classList.toggle('show', show);
+    w.setAttribute('aria-hidden', show ? 'false' : 'true');
+    if (!show && typeof Plotly !== 'undefined') { try { Plotly.purge('plotCanvas'); } catch(e){} }
   }
 
-  // Expose to inline onclick handlers
   window.toggleOutput = toggleOutput;
   window.togglePlotWindow = togglePlotWindow;
 
@@ -349,14 +255,14 @@ window.addEventListener("DOMContentLoaded", () => {
     let dragging = false, startX = 0, startY = 0, origX = 0, origY = 0;
 
     const onDown = (e) => {
-      if (e.target && e.target.closest && e.target.closest("button")) return;
+      if (e.target && e.target.closest && e.target.closest('button')) return;
       dragging = true;
       const r = winEl.getBoundingClientRect();
       origX = r.left; origY = r.top;
       startX = e.clientX; startY = e.clientY;
-      winEl.style.left = origX + "px";
-      winEl.style.top = origY + "px";
-      winEl.style.right = "auto";
+      winEl.style.left = origX + 'px';
+      winEl.style.top = origY + 'px';
+      winEl.style.right = 'auto';
       e.preventDefault();
     };
 
@@ -364,31 +270,30 @@ window.addEventListener("DOMContentLoaded", () => {
       if (!dragging) return;
       const dx = e.clientX - startX;
       const dy = e.clientY - startY;
-      winEl.style.left = (origX + dx) + "px";
-      winEl.style.top = (origY + dy) + "px";
+      winEl.style.left = (origX + dx) + 'px';
+      winEl.style.top  = (origY + dy) + 'px';
     };
 
     const onUp = () => { dragging = false; };
 
-    headerEl.addEventListener("mousedown", onDown);
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
+    headerEl.addEventListener('mousedown', onDown);
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
   }
 
   // F2 toggles Output window
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "F2") {
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'F2') {
       e.preventDefault();
       toggleOutput();
     }
   });
 
-  // Init draggables + default hidden
   setTimeout(() => {
-    const ow = document.getElementById("outputWindow");
-    const oh = document.getElementById("outputHeader");
-    const pw = document.getElementById("plotWindow");
-    const ph = document.getElementById("plotHeader");
+    const ow = document.getElementById('outputWindow');
+    const oh = document.getElementById('outputHeader');
+    const pw = document.getElementById('plotWindow');
+    const ph = document.getElementById('plotHeader');
     if (ow && oh) makeDraggable(ow, oh);
     if (pw && ph) makeDraggable(pw, ph);
     toggleOutput(false);
@@ -398,51 +303,541 @@ window.addEventListener("DOMContentLoaded", () => {
   // Store last simulation response for Plot double-click
   let __lastSim = null;
 
-
   window.onerror = function(msg, url, line, col, err) {
-    setStatus("JS ERROR: " + msg + " (line " + line + ")");
+    setStatus('JS ERROR: ' + msg + ' (line ' + line + ')');
   };
 
-  if (typeof Drawflow === "undefined") {
-    setStatus("Drawflow is NOT defined. Check /static/drawflow.min.js");
+  if (typeof joint === 'undefined' || !joint.dia) {
+    setStatus('JointJS is NOT defined. Check CDN availability.');
     return;
   }
 
-  setStatus("JS started. Initializing editor...");
+  setStatus('JS started. Initializing JointJS editor...');
 
   // ---- Block library: ports + default params ----
   const BLOCK_LIBRARY = {
-    Constant:   { inputs: [], outputs: ["y"], defaultParams: { value: 1.0 }, desc: "constant source" },
-    Gain:       { inputs: ["u"], outputs: ["y"], defaultParams: { k: 1.0 }, desc: "multiply input" },
-    Sum:        { inputs: ["u1","u2"], outputs: ["y"], defaultParams: { signs: "++" }, desc: "sum inputs" },
-    Integrator: { inputs: ["u"], outputs: ["y"], defaultParams: { x0: 0.0 }, desc: "∫ u dt" },
-    Plot:       { inputs: ["u"], outputs: [], defaultParams: { label: "" }, desc: "signal scope" },
-    TransferFunction: { inputs: ["u"], outputs: ["y"], defaultParams: { num: "1", den: "1,1" }, desc: "continuous LTI system" },
+    Constant:   { inputs: [], outputs: ['y'], defaultParams: { value: 1.0 }, desc: 'constant source' },
+    Gain:       { inputs: ['u'], outputs: ['y'], defaultParams: { k: 1.0 }, desc: 'multiply input' },
+    Sum:        { inputs: ['u1','u2'], outputs: ['y'], defaultParams: { signs: '++' }, desc: 'sum inputs' },
+    Integrator: { inputs: ['u'], outputs: ['y'], defaultParams: { x0: 0.0 }, desc: '∫ u dt' },
+    Plot:       { inputs: ['u'], outputs: [], defaultParams: { label: '' }, desc: 'signal scope' },
+    TransferFunction: { inputs: ['u'], outputs: ['y'], defaultParams: { num: '1', den: '1,1' }, desc: 'continuous LTI system' },
   };
 
-  // ---- Create Drawflow editor ----
-  const container = document.getElementById("drawflow");
-  // Ensure the canvas has keyboard focus so Delete/Backspace works immediately after reload.
-  // (Drawflow's delete-connection handler relies on key events.)
-  if (container) {
-    try { container.setAttribute("tabindex", container.getAttribute("tabindex") || "0"); } catch(e) {}
-    container.addEventListener("mousedown", () => { try { container.focus(); } catch(e) {} });
-    container.addEventListener("touchstart", () => { try { container.focus(); } catch(e) {} }, { passive: true });
-  }
-  const editor = new Drawflow(container);
-  editor.reroute = true;
-  editor.start();
-  editor.editor_mode = "edit";
+  // ---- Short display names (canvas titles) ----
+  const SHORT_NAMES = {
+    Constant: 'Const',
+    TransferFunction: 'TF',
+    Integrator: 'Int',
+    Gain: 'Gain',
+    Sum: 'Sum',
+    Plot: 'Plot'
+  };
+  function shortTypeName(type) { return SHORT_NAMES[type] || type; }
 
-  // ===== Save/Load scheme (Drawflow export/import) =====
+  // ===== JointJS graph + paper =====
+  const namespace = joint.shapes;
+  const graph = new joint.dia.Graph({}, { cellNamespace: namespace });
+
+  const wrap = document.getElementById('paperWrap');
+  const paper = new joint.dia.Paper({
+    el: wrap,
+    model: graph,
+    gridSize: 20,
+    drawGrid: true,
+    async: true,
+    background: { color: 'transparent' },
+    cellViewNamespace: namespace,
+    defaultLink: () => {
+      const l = new joint.shapes.standard.Link();
+      l.attr({
+        line: {
+          stroke: '#4a90e2',
+          strokeWidth: 2.2,
+          targetMarker: { type: 'path', d: 'M 10 -5 0 0 10 5 z' }
+        }
+      });
+      l.router('manhattan', { step: 20, padding: 12 });
+      l.connector('rounded', { radius: 8 });
+      return l;
+    },
+    interactive: function(cellView) {
+      // allow moving elements and manipulating links
+      if (cellView.model.isLink()) return { vertexAdd: false };
+      return true;
+    },
+    linkPinning: false,
+    snapLinks: { radius: 30 },
+    markAvailable: true
+  });
+  // === Port positioning: tangent to block edge (circle edge touches the block edge) ===
+  // We keep the visual port radius = 7, but shift the port CENTER inward by 7px.
+  const PORT_RADIUS = 7;     // must match portBody r
+  const PORT_INSET  = PORT_RADIUS;
+
+  function leftInsetPositioner(ports, elBBox /*, opt */) {
+    const n = ports.length || 1;
+    const pad = 14; // vertical padding inside the block
+    const h = Math.max(1, elBBox.height - 2 * pad);
+    return ports.map((p, i) => ({
+      x: elBBox.x - PORT_INSET,
+      y: elBBox.y + pad + (n === 1 ? h / 2 : (h * i) / (n - 1))
+    }));
+  }
+
+  function rightInsetPositioner(ports, elBBox /*, opt */) {
+    const n = ports.length || 1;
+    const pad = 14;
+    const h = Math.max(1, elBBox.height - 2 * pad);
+    return ports.map((p, i) => ({
+      x: elBBox.x + elBBox.width + PORT_INSET,
+      y: elBBox.y + pad + (n === 1 ? h / 2 : (h * i) / (n - 1))
+    }));
+  }
+
+
+  function fitPaper() {
+    const r = wrap.getBoundingClientRect();
+    paper.setDimensions(r.width, r.height);
+  }
+  window.addEventListener('resize', fitPaper);
+  fitPaper();
+
+  // ===== Ports config =====
+  const PORT_MARKUP = [
+    // Larger invisible hit area so the user can reliably start a connection
+    { tagName: 'circle', selector: 'portHit', attributes: { r: 7, fill: 'none', stroke: 'transparent', 'stroke-width': 18, 'pointer-events': 'stroke', class: 'joint-port-hit' } },
+    { tagName: 'circle', selector: 'portBody', attributes: { r: 7, class: 'joint-port-body' } },
+    // Let clicks go through the text to the magnet circle(s)
+    { tagName: 'text', selector: 'portArrow', attributes: { 'font-size': 11, 'font-weight': 900, 'text-anchor': 'middle', 'y': 4, 'pointer-events': 'none' } }
+  ];
+
+  const portGroups = {
+    in: {
+      position: leftInsetPositioner,
+
+      attrs: {
+        portHit: { magnet: 'passive' },
+        portBody: { fill: '#f5a3c7', stroke: '#d86aa0', magnet: 'passive' },
+        portArrow: { text: '▶', fill: '#000', x: 0 }
+      },
+      markup: PORT_MARKUP,
+      label: { position: { name: 'left', args: { y: 0 } }, markup: [] }
+    },
+    out: {
+      position: rightInsetPositioner,
+
+      attrs: {
+        portHit: { magnet: true },
+        portBody: { fill: '#9ecbff', stroke: '#4a90e2', magnet: true },
+        portArrow: { text: '▶', fill: '#000', x: 0 }
+      },
+      markup: PORT_MARKUP,
+      label: { position: { name: 'right', args: { y: 0 } }, markup: [] }
+    }
+  };
+
+  // ===== Node HTML (kept: title + desc + paramsLine) =====
+  function escapeHtml(s) {
+    return String(s)
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#039;');
+  }
+
+  function formatParamsLine(type, params, meta) {
+    const spec = BLOCK_LIBRARY[type] || {};
+    const defaults = spec.defaultParams || {};
+
+    if (type === 'Plot') {
+      const sig = (meta && meta.signalPretty) ? String(meta.signalPretty) : '';
+      const lbl = (params && typeof params.label === 'string') ? params.label.trim() : '';
+      if (lbl && sig && lbl !== sig) return `${lbl} — ${sig}`;
+      if (lbl) return lbl;
+      if (sig) return sig;
+      return '(not connected)';
+    }
+    if (type === 'Constant')   return `value=${(params && params.value !== undefined) ? params.value : defaults.value}`;
+    if (type === 'Gain')       return `k=${(params && params.k !== undefined) ? params.k : defaults.k}`;
+    if (type === 'Sum')        return `signs=${(params && params.signs !== undefined) ? params.signs : defaults.signs}`;
+    if (type === 'Integrator') return `x0=${(params && params.x0 !== undefined) ? params.x0 : defaults.x0}`;
+    if (type === 'TransferFunction') {
+      const num = (params && params.num !== undefined) ? params.num : defaults.num;
+      const den = (params && params.den !== undefined) ? params.den : defaults.den;
+      return `num=${num}, den=${den}`;
+    }
+
+    const parts = [];
+    for (const k of Object.keys(defaults)) {
+      const cur = (params && params[k] !== undefined) ? params[k] : defaults[k];
+      parts.push(`${k}=${cur}`);
+    }
+    return parts.join(', ');
+  }
+
+  function computePlotSignalPretty(plotId) {
+    const plotEl = graph.getCell(String(plotId));
+    if (!plotEl) return '';
+
+    // incoming link to Plot.u
+    const inbound = graph.getConnectedLinks(plotEl, { inbound: true });
+    const link = inbound.find(l => (l.get('target') || {}).port === 'u');
+    if (!link) return '';
+
+    const src = link.get('source') || {};
+    const srcId = String(src.id || '');
+    const srcPort = String(src.port || 'y');
+    const srcEl = graph.getCell(srcId);
+    const srcType = srcEl ? srcEl.get('blockType') : '';
+
+    return `${shortTypeName(srcType)} (${srcId}).${srcPort}`;
+  }
+
+  function blockText(type, id, params) {
+    const shown = shortTypeName(type);
+    const title = `${shown} (${id})`;
+    const desc = (BLOCK_LIBRARY[type] && typeof BLOCK_LIBRARY[type].desc === 'string') ? BLOCK_LIBRARY[type].desc : '';
+
+    let sigPretty = '';
+    if (type === 'Plot') sigPretty = computePlotSignalPretty(id) || '';
+    const line = formatParamsLine(type, params || {}, { signalPretty: sigPretty });
+
+    // Using SVG <text> multiline (\n). JointJS splits lines.
+    const parts = [title];
+    if (desc) parts.push(desc);
+    if (line) parts.push(line);
+    return parts.join('\n');
+  }
+
+  // ===== Create blocks =====
+  let nextId = 1;
+  function allocId() { return String(nextId++); }
+
+  function createBlockCell(type, x, y, params, forcedId) {
+    const spec = BLOCK_LIBRARY[type];
+    if (!spec) throw new Error('Unknown type: ' + type);
+
+    const id = forcedId ? String(forcedId) : allocId();
+    const p = params ? JSON.parse(JSON.stringify(params)) : JSON.parse(JSON.stringify(spec.defaultParams));
+
+    const el = new joint.shapes.standard.Rectangle({
+      id,
+      blockType: type,
+      params: p
+    });
+
+    el.position(x, y);
+    el.resize(170, 76);
+
+    el.attr({
+      body: {
+        rx: 10, ry: 10,
+        stroke: '#b8c0cc',
+        strokeWidth: 1.2,
+        fill: '#ffffff'
+      },
+      label: {
+        text: blockText(type, id, p),
+        fill: '#111',
+        fontSize: 12,
+        fontFamily: 'Arial, sans-serif',
+        textWrap: { width: -10, height: -10 }
+      }
+    });
+
+    // ports
+    el.set('ports', { groups: portGroups, items: [] });
+    const inPorts  = spec.inputs.map(name => ({ id: name, group: 'in' }));
+    const outPorts = spec.outputs.map(name => ({ id: name, group: 'out' }));
+    el.addPorts([...inPorts, ...outPorts]);
+
+    el.addTo(graph);
+    return el;
+  }
+
+  function refreshBlockText(id) {
+    const el = graph.getCell(String(id));
+    if (!el || el.isLink()) return;
+    const type = el.get('blockType');
+    const params = el.get('params') || {};
+    el.attr('label/text', blockText(type, String(id), params));
+  }
+
+  // ===== Selection + param editor =====
+  let selectedNodeId = null;
+
+  function renderParamEditor() {
+    const info = document.getElementById('selectedInfo');
+    const pe = document.getElementById('paramEditor');
+    pe.innerHTML = '';
+
+    if (!selectedNodeId) {
+      info.textContent = 'Nothing selected.';
+      return;
+    }
+
+    const node = graph.getCell(String(selectedNodeId));
+    if (!node) {
+      selectedNodeId = null;
+      info.textContent = 'Nothing selected.';
+      return;
+    }
+
+    const type = node.get('blockType');
+    const spec = BLOCK_LIBRARY[type];
+    const params = node.get('params') || {};
+
+    info.innerHTML = `<div><b>ID:</b> ${selectedNodeId} <br><b>Type:</b> ${escapeHtml(type)}</div>`;
+
+    const defaults = (spec && spec.defaultParams) ? spec.defaultParams : {};
+    const keys = Object.keys(defaults);
+
+    if (!keys.length) {
+      pe.innerHTML = `<div class="hint">No params for this block.</div>`;
+      return;
+    }
+
+    keys.forEach((k) => {
+      const row = document.createElement('div');
+      row.className = 'kv';
+      const lab = document.createElement('label');
+      lab.textContent = k;
+
+      const inp = document.createElement('input');
+      const defv = defaults[k];
+      const isNum = (typeof defv === 'number');
+      inp.type = isNum ? 'number' : 'text';
+      if (isNum) inp.step = 'any';
+      inp.value = (params[k] !== undefined) ? params[k] : defv;
+
+      const nodeId = String(selectedNodeId);
+
+      const commit = () => {
+        const n = graph.getCell(nodeId);
+        if (!n) return;
+
+        let newVal;
+        if (isNum) {
+          const v = parseFloat(inp.value);
+          newVal = Number.isFinite(v) ? v : defv;
+        } else {
+          newVal = inp.value;
+        }
+
+        const newParams = { ...(n.get('params') || {}) , [k]: newVal };
+        n.set('params', newParams);
+        refreshBlockText(nodeId);
+      };
+
+      inp.addEventListener('focus', () => { try { inp.select(); } catch(e){} });
+      inp.addEventListener('input', commit);
+      inp.addEventListener('change', commit);
+      inp.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { commit(); inp.blur(); }
+      });
+
+      row.appendChild(lab);
+      row.appendChild(inp);
+      pe.appendChild(row);
+    });
+  }
+
+  // Click-to-select
+  paper.on('element:pointerdown', (elementView) => {
+    selectedNodeId = String(elementView.model.id);
+    renderParamEditor();
+  });
+  paper.on('blank:pointerdown', () => {
+    selectedNodeId = null;
+    renderParamEditor();
+  });
+
+  // Ctrl+R rotates the currently selected block (snap 0/90/180/270)
+  function getAngleSnap(a) {
+    const n = Math.round(((a % 360) + 360) % 360 / 90) * 90;
+    return (n + 360) % 360;
+  }
+  document.addEventListener('keydown', (e) => {
+    const tag = (e.target && e.target.tagName) ? e.target.tagName.toUpperCase() : '';
+    const isTyping = (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (e.target && e.target.isContentEditable));
+    if (!isTyping && e.ctrlKey && (e.key === 'r' || e.key === 'R')) {
+      e.preventDefault();
+      if (!selectedNodeId) return;
+      const el = graph.getCell(String(selectedNodeId));
+      if (!el) return;
+      const cur = el.angle() || 0;
+      el.rotate(getAngleSnap(cur + 90), true);
+      // link reroute
+      graph.getConnectedLinks(el).forEach(l => l.router('manhattan', { step: 20, padding: 12 }));
+    }
+  });
+
+  // ===== Link behavior: enforce 1 wire per input =====
+  function enforceOneWirePerInput(link) {
+    const tgt = link.get('target') || {};
+    if (!tgt.id || !tgt.port) return;
+    const targetEl = graph.getCell(String(tgt.id));
+    if (!targetEl) return;
+    if (targetEl.get('blockType') === 'Plot') {
+      // Plot input also should be single
+    }
+    const inbound = graph.getConnectedLinks(targetEl, { inbound: true });
+    const samePort = inbound.filter(l => l.id !== link.id && (l.get('target') || {}).port === tgt.port);
+    samePort.forEach(l => l.remove());
+  }
+
+  // Refresh Plot auto-labels after topology changes
+  function refreshAllPlotNodeLabels() {
+    graph.getElements().forEach(el => {
+      if (el.get('blockType') === 'Plot') {
+        // Auto-fill label if empty
+        const p = el.get('params') || {};
+        const curLabel = (typeof p.label === 'string') ? p.label.trim() : '';
+        const sig = computePlotSignalPretty(el.id) || '';
+        if (!curLabel && sig) {
+          el.set('params', { ...p, label: sig });
+        }
+        refreshBlockText(el.id);
+      }
+    });
+  }
+
+  paper.on('link:connect', (linkView, evt, elementViewConnected, magnet, arrowhead) => {
+    const link = linkView.model;
+    if (arrowhead === 'target') {
+      enforceOneWirePerInput(link);
+      refreshAllPlotNodeLabels();
+    }
+  });
+  paper.on('link:disconnect', () => refreshAllPlotNodeLabels());
+
+  // ===== Hover highlight (ports OR links) + click selection for links =====
+  let selectedLinkId = null;
+  const hoverLinks = new Set();
+
+  function clearHover() {
+    for (const id of hoverLinks) {
+      const l = graph.getCell(id);
+      if (l && l.isLink() && id !== selectedLinkId) {
+        l.attr('line/strokeWidth', 2.2);
+        l.attr('line/filter', null);
+      }
+    }
+    hoverLinks.clear();
+  }
+
+  function highlightLinks(links) {
+    clearHover();
+    links.forEach(l => {
+      if (!l) return;
+      if (String(l.id) === selectedLinkId) return;
+      l.attr('line/strokeWidth', 3.6);
+      hoverLinks.add(String(l.id));
+    });
+  }
+
+  function setSelectedLink(link) {
+    // reset old
+    if (selectedLinkId) {
+      const old = graph.getCell(String(selectedLinkId));
+      if (old && old.isLink()) {
+        old.attr('line/stroke', '#4a90e2');
+        old.attr('line/strokeWidth', 2.2);
+      }
+    }
+    selectedLinkId = link ? String(link.id) : null;
+    if (selectedLinkId) {
+      const l = graph.getCell(selectedLinkId);
+      if (l && l.isLink()) {
+        l.attr('line/stroke', '#8b5cf6');
+        l.attr('line/strokeWidth', 3.8);
+      }
+    }
+  }
+
+  paper.on('link:pointerdown', (linkView) => {
+    setSelectedLink(linkView.model);
+  });
+  paper.on('blank:pointerdown', () => {
+    setSelectedLink(null);
+    clearHover();
+  });
+
+  // Hover link
+  paper.on('link:mouseenter', (linkView) => highlightLinks([linkView.model]));
+  paper.on('link:mouseleave', () => clearHover());
+
+  // Hover port (mouseenter on element -> inspect DOM target)
+  paper.on('element:mouseenter', (elementView, evt) => {
+    const portId = evt && evt.target ? evt.target.getAttribute('port') : null;
+    if (!portId) return;
+    const el = elementView.model;
+    const isOut = (evt.target && evt.target.closest) ? !!evt.target.closest('.joint-port') && (evt.target.getAttribute('port-group') === 'out') : false;
+
+    const links = graph.getConnectedLinks(el, isOut ? { outbound: true } : { inbound: true });
+    const filtered = links.filter(l => {
+      const s = l.get('source') || {}; const t = l.get('target') || {};
+      return isOut ? (s.port === portId) : (t.port === portId);
+    });
+    if (filtered.length) highlightLinks(filtered);
+  });
+  paper.on('element:mouseleave', () => clearHover());
+
+  // Delete selected link with Delete/Backspace
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+      const tag = (e.target && e.target.tagName) ? e.target.tagName.toUpperCase() : '';
+      const isTyping = (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (e.target && e.target.isContentEditable));
+      if (isTyping) return;
+      if (selectedLinkId) {
+        const l = graph.getCell(String(selectedLinkId));
+        if (l && l.isLink()) {
+          l.remove();
+          selectedLinkId = null;
+          clearHover();
+          refreshAllPlotNodeLabels();
+        }
+      }
+    }
+  });
+
+  // ===== Public API: addBlock/save/load/exportGraph/simulate =====
+  window.addBlock = function addBlock(type) {
+    const spec = BLOCK_LIBRARY[type];
+    if (!spec) return alert('Unknown type: ' + type);
+    const x = 320 + Math.random() * 220;
+    const y = 60 + Math.random() * 240;
+    const el = createBlockCell(type, x, y);
+    refreshAllPlotNodeLabels();
+    return el.id;
+  };
+
   window.saveScheme = function saveScheme() {
-    const data = editor.export();
-    const json = JSON.stringify(data, null, 2);
-    const blob = new Blob([json], { type: "application/json" });
+    const scheme = {
+      version: 1,
+      nextId,
+      elements: graph.getElements().map(el => ({
+        id: String(el.id),
+        type: el.get('blockType'),
+        params: el.get('params') || {},
+        x: el.position().x,
+        y: el.position().y,
+        angle: el.angle() || 0
+      })),
+      links: graph.getLinks().map(l => ({
+        source: l.get('source'),
+        target: l.get('target')
+      }))
+    };
+
+    const json = JSON.stringify(scheme, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
+    const a = document.createElement('a');
     a.href = url;
-    a.download = "scheme.json";
+    a.download = 'scheme.json';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -455,513 +850,116 @@ window.addEventListener("DOMContentLoaded", () => {
     const reader = new FileReader();
     reader.onload = () => {
       try {
-        const data = JSON.parse(reader.result);
-        editor.clear();
-        editor.import(data);
+        const scheme = JSON.parse(reader.result);
+        graph.clear();
 
-        // If you have custom routing/plot label refresh functions, call them if present.
-        setTimeout(() => {
-          try { if (typeof updateOrthogonalConnections === "function") updateOrthogonalConnections(true); } catch (e) {}
-          try { if (typeof refreshAllPlotNodeLabels === "function") refreshAllPlotNodeLabels(); } catch (e) {}
-        }, 0);
+        nextId = Math.max(1, parseInt(scheme.nextId || '1', 10));
+
+        // elements
+        const idSet = new Set();
+        (scheme.elements || []).forEach(e => {
+          const el = createBlockCell(e.type, e.x || 50, e.y || 50, e.params || {}, e.id);
+          idSet.add(String(el.id));
+          if (typeof e.angle === 'number') el.rotate(getAngleSnap(e.angle), true);
+        });
+
+        // links
+        (scheme.links || []).forEach(w => {
+          if (!w || !w.source || !w.target) return;
+          if (!w.source.id || !w.target.id) return;
+          const link = paper.options.defaultLink();
+          link.source({ id: String(w.source.id), port: w.source.port });
+          link.target({ id: String(w.target.id), port: w.target.port });
+          link.addTo(graph);
+        });
+
+        // Ensure nextId is above max numeric id present
+        const nums = Array.from(idSet).map(s => parseInt(s, 10)).filter(n => Number.isFinite(n));
+        const maxId = nums.length ? Math.max(...nums) : 0;
+        nextId = Math.max(nextId, maxId + 1);
+
+        refreshAllPlotNodeLabels();
+        renderParamEditor();
       } catch (e) {
-        alert("Nelze načíst schéma: " + e);
+        alert('Nelze načíst schéma: ' + e);
       }
     };
     reader.readAsText(file);
-    ev.target.value = "";
+    ev.target.value = '';
   };
 
-  // --- Helpers for block rotation (Ctrl+R) ---
-  function getRotationDeg(nodeId) {
-    const n = editor.getNodeFromId(nodeId);
-    const r = n?.data?.rotationDeg;
-    return (typeof r === "number" && Number.isFinite(r)) ? r : 0;
-  }
-
-  function setRotationDeg(nodeId, deg) {
-    const n = editor.getNodeFromId(nodeId);
-    if (!n) return;
-
-    const norm = ((((deg % 360) + 360) % 360) / 90 | 0) * 90; // snap to 0/90/180/270
-    const newData = { ...(n.data || {}), rotationDeg: norm };
-    editor.updateNodeDataFromId(nodeId, newData);
-
-    // Apply to DOM (rotate around center)
-    const nodeEl = document.getElementById(`node-${nodeId}`);
-    if (nodeEl) {
-      nodeEl.style.transformOrigin = "center center";
-      nodeEl.style.transform = `rotate(${norm}deg)`;
-    }
-
-    // Recompute wire geometry
-    editor.updateConnectionNodes(`node-${nodeId}`);
-  }
-
-  // Ctrl+R rotates the currently selected block
-  document.addEventListener("keydown", (e) => {
-    // Don't steal Ctrl+R when typing into an input (parameter editor)
-    const tag = (e.target && e.target.tagName) ? e.target.tagName.toUpperCase() : "";
-    const isTyping = (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (e.target && e.target.isContentEditable));
-
-    if (!isTyping && e.ctrlKey && (e.key === "r" || e.key === "R")) {
-      e.preventDefault();
-      if (!selectedNodeId) return;
-      const cur = getRotationDeg(selectedNodeId);
-      setRotationDeg(selectedNodeId, cur + 90);
-    }
-  });
-
-  setStatus("Editor started.");
-
-  let selectedNodeId = null;
-
-    // ---- Short display names (canvas titles) ----
-  const SHORT_NAMES = {
-    Constant: "Const",
-    TransferFunction: "TF",
-    Integrator: "Int",
-    Gain: "Gain",
-    Sum: "Sum",
-    Plot: "Plot"
-  };
-
-  function shortTypeName(type) {
-    return SHORT_NAMES[type] || type;
-  }
-
-
-  function isDefaultValue(a, b) {
-    // numbers with tolerance, otherwise strict-ish string compare
-    if (typeof a === "number" || typeof b === "number") {
-      const na = Number(a), nb = Number(b);
-      if (!Number.isFinite(na) || !Number.isFinite(nb)) return String(a) === String(b);
-      return Math.abs(na - nb) <= 1e-12;
-    }
-    return String(a ?? "").trim() === String(b ?? "").trim();
-  }
-
-  function formatParamsLine(type, params, meta) {
-    const spec = BLOCK_LIBRARY[type] || {};
-    const defaults = spec.defaultParams || {};
-
-    // Plot: show single compact line, prefer user label if set, always include signal if connected.
-    if (type === "Plot") {
-      const sig = (meta && meta.signalPretty) ? String(meta.signalPretty) : "";
-      const lbl = (params && typeof params.label === "string") ? params.label.trim() : "";
-      if (lbl && sig && lbl !== sig) return `${lbl} — ${sig}`;
-      if (lbl) return lbl;
-      if (sig) return sig;
-      return "(not connected)";
-    }
-
-    // Pretty single-line formats for common blocks
-    if (type === "Constant") {
-      const v = (params && params.value !== undefined) ? params.value : defaults.value;
-      return `value=${v}`;
-    }
-    if (type === "Gain") {
-      const k = (params && params.k !== undefined) ? params.k : defaults.k;
-      return `k=${k}`;
-    }
-    if (type === "Sum") {
-      const s = (params && params.signs !== undefined) ? params.signs : defaults.signs;
-      return `signs=${s}`;
-    }
-    if (type === "Integrator") {
-      const x0 = (params && params.x0 !== undefined) ? params.x0 : defaults.x0;
-      return `x0=${x0}`;
-    }
-    if (type === "TransferFunction") {
-      const num = (params && params.num !== undefined) ? params.num : defaults.num;
-      const den = (params && params.den !== undefined) ? params.den : defaults.den;
-      return `num=${num}, den=${den}`;
-    }
-
-    // Fallback: show all default keys (stable layout, always informative)
-    const parts = [];
-    for (const k of Object.keys(defaults)) {
-      const cur = (params && params[k] !== undefined) ? params[k] : defaults[k];
-      parts.push(`${k}=${cur}`);
-    }
-    return parts.join(", ");
-  }
-function nodeHtml(type, params, id) {
-        const shown = shortTypeName(type);
-    const title = (id !== undefined && id !== null && String(id).length) ? `${shown} (${id})` : shown;
-
-    const desc = (BLOCK_LIBRARY[type] && typeof BLOCK_LIBRARY[type].desc === 'string') ? BLOCK_LIBRARY[type].desc : '';
-
-    // Build one compact params line (always).
-    let sigPretty = "";
-    if (type === "Plot") {
-      sigPretty = (params && typeof params.__signalPretty === "string" && params.__signalPretty.trim())
-        ? params.__signalPretty.trim()
-        : "";
-    }
-
-    const paramsLine = formatParamsLine(type, params, { signalPretty: sigPretty });
-
-    return `
-      <div>
-        <div class="node-title">${title}</div>
-        ${desc ? `<div class="node-type">${escapeHtml(desc)}</div>` : ""}
-        ${paramsLine ? `<div class="node-params">${escapeHtml(paramsLine)}</div>` : ""}
-      </div>
-    `;
-  }
-
-  function escapeHtml(s) {
-    return String(s)
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("'", "&#039;");
-  }
-
-  function getPrettySignalForPlotNode(plotNodeId) {
-    const pNode = editor.getNodeFromId(plotNodeId);
-    if (!pNode || !pNode.inputs || !pNode.inputs.input_1) return "";
-
-    const conns = pNode.inputs.input_1.connections || [];
-    if (!conns.length) return "";
-
-    const c = conns[0];
-    const srcId = String(c.node);
-    const srcNode = editor.getNodeFromId(parseInt(srcId, 10));
-    if (!srcNode) return "";
-    const srcType = srcNode.name;
-    const srcSpec = srcType ? BLOCK_LIBRARY[srcType] : null;
-
-    const outStr =
-      (typeof c.output === "string") ? c.output :
-      (typeof c.output_id === "string") ? c.output_id :
-      "output_1";
-
-    const mo = String(outStr).match(/output_(\d+)/);
-    const outIndex = mo ? (parseInt(mo[1], 10) - 1) : 0;
-    const port = (srcSpec && srcSpec.outputs && srcSpec.outputs[outIndex]) ? srcSpec.outputs[outIndex] : "y";
-
-    // Match the UI convention: Type (ID).port
-    return `${srcType} (${srcId}).${port}`;
-  }
-
-  // Expose addBlock/exportGraph/simulate globally for onclick handlers
-  window.addBlock = function addBlock(type) {
-    const spec = BLOCK_LIBRARY[type];
-    if (!spec) return alert("Unknown type: " + type);
-
-    const params = JSON.parse(JSON.stringify(spec.defaultParams)); // deep copy
-    const data = { blockType: type, params };
-
-    const inputsCount = spec.inputs.length;
-    const outputsCount = spec.outputs.length;
-
-    const x = 300 + Math.random() * 200;
-    const y = 60 + Math.random() * 200;
-
-    const newId = editor.addNode(
-      type,
-      inputsCount,
-      outputsCount,
-      x, y,
-      type,
-      data,
-      nodeHtml(type, params)
-    );
-    // Update title to Type (ID)
-    refreshNodeHtml(newId);
-  };
-
-  editor.on("nodeSelected", function(id) {
-    selectedNodeId = id;
-    renderParamEditor();
-  });
-
-  editor.on("nodeUnselected", function() {
-    selectedNodeId = null;
-    renderParamEditor();
-  });
-
-  function refreshNodeHtml(id) {
-    const n = editor.getNodeFromId(id);
-    const type = n.name;
-    const baseParams = (n.data && n.data.params) ? n.data.params : {};
-
-    // For Plot blocks:
-    // - compute a friendly signal label (short type + ID + port)
-    // - if user has NOT set Label yet (empty), auto-fill it from Signal (still editable)
-    let sigPretty = "";
-    if (type === "Plot") {
-      sigPretty = computePlotSignalPretty(id) || "";
-      const curLabel = (typeof baseParams.label === "string") ? baseParams.label.trim() : "";
-      if (!curLabel && sigPretty) {
-        const newData = {
-          ...(n.data || {}),
-          params: { ...baseParams, label: sigPretty }
-        };
-        editor.updateNodeDataFromId(id, newData);
-        // keep local view in sync
-        baseParams.label = sigPretty;
-      }
-    }
-
-    const params = (type === "Plot")
-      ? { ...baseParams, __signalPretty: sigPretty }
-      : baseParams;
-
-    const el = document.querySelector(`#node-${id} .drawflow_content_node`);
-    if (el) el.innerHTML = nodeHtml(type, params, id);
-  }
-
-  function computePlotSignalPretty(plotNodeId) {
-    const pNode = editor.getNodeFromId(plotNodeId);
-    if (!pNode || !pNode.inputs || !pNode.inputs.input_1) return "";
-    const conns = pNode.inputs.input_1.connections || [];
-    if (!conns.length) return "";
-
-    const c = conns[0];
-    const srcId = String(c.node);
-    const srcNode = editor.getNodeFromId(parseInt(srcId, 10));
-    if (!srcNode) return `${srcId}.?`;
-
-    const srcType = srcNode.name || "";
-    const srcSpec = srcType ? BLOCK_LIBRARY[srcType] : null;
-
-    const outStr =
-      (typeof c.output === "string") ? c.output :
-      (typeof c.output_id === "string") ? c.output_id :
-      "output_1";
-
-    const mo = String(outStr).match(/output_(\d+)/);
-    const outIndex = mo ? (parseInt(mo[1], 10) - 1) : 0;
-    const port = (srcSpec && srcSpec.outputs && srcSpec.outputs[outIndex]) ? srcSpec.outputs[outIndex] : "y";
-
-    // Match the block naming style used elsewhere: Type (ID) (shortened for display)
-    const short = shortTypeName(srcType);
-    return `${short} (${srcId}).${port}`;
-  }
-
-  function renderParamEditor() {
-    const info = document.getElementById("selectedInfo");
-    const pe = document.getElementById("paramEditor");
-    pe.innerHTML = "";
-
-    if (!selectedNodeId) {
-      info.textContent = "Nothing selected.";
-      return;
-    }
-    const node = editor.getNodeFromId(selectedNodeId);
-    const type = node.name;
-    const spec = BLOCK_LIBRARY[type];
-    const params = node.data.params || {};
-
-    info.innerHTML = `<div><b>ID:</b> ${selectedNodeId} <br><b>Type:</b> ${type}</div>`;
-
-    const defaults = spec.defaultParams || {};
-    const keys = Object.keys(defaults);
-
-    if (keys.length === 0) {
-      pe.innerHTML = `<div class="hint">No params for this block.</div>`;
-      return;
-    }
-
-    keys.forEach(k => {
-      const row = document.createElement("div");
-      row.className = "kv";
-      const lab = document.createElement("label");
-      lab.textContent = k;
-
-      const inp = document.createElement("input");
-      const defv = defaults[k];
-      const isNum = (typeof defv === "number");
-      inp.type = isNum ? "number" : "text";
-      if (isNum) inp.step = "any";
-      inp.value = (params[k] !== undefined) ? params[k] : defv;
-
-const nodeId = selectedNodeId; // capture at render time (selection may change when focusing input)
-
-const commit = () => {
-  if (!nodeId) return;
-
-  const nodeNow = editor.getNodeFromId(nodeId);
-  if (!nodeNow) return;
-
-  let newVal;
-  if (isNum) {
-    const v = parseFloat(inp.value);
-    newVal = Number.isFinite(v) ? v : defv;
-  } else {
-    newVal = inp.value;
-  }
-
-  const newData = {
-    ...(nodeNow.data || {}),
-    params: {
-      ...((nodeNow.data && nodeNow.data.params) ? nodeNow.data.params : {}),
-      [k]: newVal
-    }
-  };
-
-  editor.updateNodeDataFromId(nodeId, newData);
-  refreshNodeHtml(nodeId);
-};
-
-inp.addEventListener("focus", () => { try { inp.select(); } catch(e){} });
-
-// Commit while typing
-inp.addEventListener("input", commit);
-
-// Commit on blur (click elsewhere)
-inp.addEventListener("change", commit);
-
-// Commit on Enter
-inp.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") {
-    commit();
-    inp.blur(); // visual feedback: leave edit mode
-  }
-});
-
-      row.appendChild(lab);
-      row.appendChild(inp);
-      pe.appendChild(row);
-    });
-  }
-
+  // Export graph in the SAME structure your /simulate endpoint expects
   window.exportGraph = function exportGraph() {
-    const df = editor.export();
-    const nodesObj = df.drawflow.Home.data;
-
-    // Separate "simulation" nodes from UI-only nodes (Plot)
-    const simNodeIds = new Set();
-    const plotNodeIds = new Set();
-    for (const [nid, node] of Object.entries(nodesObj)) {
-      if (node.name === "Plot") plotNodeIds.add(String(nid));
-      else simNodeIds.add(String(nid));
-    }
-    const plotSignals = []; // {block, port, label}
-
-    // Collect Plot blocks as "scopes": each Plot block logs the signal connected to its input.
-    for (const plotId of Array.from(plotNodeIds)) {
-      const pNode = nodesObj[plotId];
-      if (!pNode) continue;
-
-      // label (optional)
-      const lbl = (pNode.data && pNode.data.params && typeof pNode.data.params.label === "string") ? pNode.data.params.label : "";
-
-      // Plot has single input "u" -> Drawflow key is "input_1"
-      const inObj = (pNode.inputs && pNode.inputs.input_1) ? pNode.inputs.input_1 : null;
-      const conns = (inObj && Array.isArray(inObj.connections)) ? inObj.connections : [];
-      if (!conns.length) continue;
-
-      // We only support one signal per Plot for now (first connection)
-      const c = conns[0];
-      const srcId = String(c.node);
-      const srcNode = nodesObj[srcId];
-      if (!srcNode) continue;
-      if (srcNode.name === "Plot") continue;
-
-      const srcSpec = BLOCK_LIBRARY[srcNode.name];
-      if (!srcSpec) continue;
-
-      const outStr =
-        (typeof c.output === "string") ? c.output :
-        (typeof c.output_id === "string") ? c.output_id :
-        "output_1";
-
-      const mo = String(outStr).match(/output_(\d+)/);
-      const outIndex = mo ? (parseInt(mo[1], 10) - 1) : 0;
-      const outPortName = srcSpec.outputs[outIndex] || srcSpec.outputs[0] || "y";
-
-      plotSignals.push({ plotId: String(plotId), block: srcId, port: outPortName, label: lbl });
-    }
-
-
     const blocks = [];
     const wires = [];
 
-    for (const [nid, node] of Object.entries(nodesObj)) {
-      if (node.name === "Plot") continue;
-      const type = node.name;
-      const params = node.data?.params || {};
+    const elems = graph.getElements();
+
+    // blocks (exclude Plot)
+    elems.forEach(el => {
+      const type = el.get('blockType');
+      if (type === 'Plot') return;
       blocks.push({
-        id: String(nid),
+        id: String(el.id),
         type,
-        params,
-        ui: { x: node.pos_x, y: node.pos_y, rotationDeg: (node.data && typeof node.data.rotationDeg === 'number') ? node.data.rotationDeg : 0 }
+        params: el.get('params') || {},
+        ui: { x: el.position().x, y: el.position().y, rotationDeg: getAngleSnap(el.angle() || 0) }
       });
-    }
+    });
 
-    
-// Build wires by scanning INPUT connections (robust)
-for (const [dstIdRaw, dstNode] of Object.entries(nodesObj)) {
-  const dstId = String(dstIdRaw);
-  const dstType = dstNode.name;
-  const dstSpec = BLOCK_LIBRARY[dstType];
-  if (!dstSpec) continue;
-  if (dstType === "Plot") continue;
+    // plotSignals (Plot scopes)
+    const plotSignals = [];
+    elems.forEach(el => {
+      const type = el.get('blockType');
+      if (type !== 'Plot') return;
+      const p = el.get('params') || {};
+      const lbl = (typeof p.label === 'string') ? p.label : '';
 
-  const inputs = dstNode.inputs || {};
-  for (const [inKey, inVal] of Object.entries(inputs)) {
-    const mi = String(inKey || "").match(/input_(\d+)/);
-    if (!mi) continue;
+      const inbound = graph.getConnectedLinks(el, { inbound: true });
+      const link = inbound.find(l => (l.get('target') || {}).port === 'u');
+      if (!link) return;
+      const src = link.get('source') || {};
+      if (!src.id || !src.port) return;
+      const srcEl = graph.getCell(String(src.id));
+      if (!srcEl) return;
+      if (srcEl.get('blockType') === 'Plot') return;
 
-    const inIndex = parseInt(mi[1], 10) - 1;
-    const inPortName = dstSpec.inputs[inIndex];
-    if (!inPortName) continue;
+      plotSignals.push({ plotId: String(el.id), block: String(src.id), port: String(src.port), label: lbl });
+    });
 
-    const conns = (inVal && inVal.connections) ? inVal.connections : [];
-    for (const c of conns) {
-      const srcId = String(c.node);
-      const srcNode = nodesObj[srcId];
-      if (!srcNode) continue;
-      if (srcNode.name === "Plot") continue;
-
-      const srcSpec = BLOCK_LIBRARY[srcNode.name];
-      if (!srcSpec) continue;
-
-      const outStr =
-        (typeof c.output === "string") ? c.output :
-        (typeof c.output_id === "string") ? c.output_id :
-        "output_1";
-
-      const mo = String(outStr).match(/output_(\d+)/);
-      if (!mo) continue;
-
-      const outIndex = parseInt(mo[1], 10) - 1;
-      const outPortName = srcSpec.outputs[outIndex];
-      if (!outPortName) continue;
+    // wires: every link where target is NOT Plot
+    graph.getLinks().forEach(l => {
+      const src = l.get('source') || {};
+      const tgt = l.get('target') || {};
+      if (!src.id || !src.port || !tgt.id || !tgt.port) return;
+      const srcEl = graph.getCell(String(src.id));
+      const tgtEl = graph.getCell(String(tgt.id));
+      if (!srcEl || !tgtEl) return;
+      if (srcEl.get('blockType') === 'Plot') return;
+      if (tgtEl.get('blockType') === 'Plot') return; // exclude Plot from simulation wires
 
       wires.push({
-        from: { block: srcId, port: outPortName },
-        to:   { block: dstId, port: inPortName }
+        from: { block: String(src.id), port: String(src.port) },
+        to:   { block: String(tgt.id), port: String(tgt.port) }
       });
-    }
-  }
-}
+    });
 
-// TransferFunction is now simulated server-side (no export-time macro needed).
+    const scopeSignals =
+      (plotSignals.length
+        ? Array.from(new Map(plotSignals.map(s => [`${s.block}.${s.port}`, { block: s.block, port: s.port }])).values())
+        : blocks.filter(b => b.type === 'Integrator').map(b => ({ block: b.id, port: 'y' }))
+      );
 
-    // If there are Plot blocks, log the union of their connected signals.
-// Otherwise (no Plot blocks), log all Integrator outputs by default.
-const scopeSignals =
-  (plotSignals.length
-    ? Array.from(new Map(plotSignals.map(s => [`${s.block}.${s.port}`, { block: s.block, port: s.port }])).values())
-    : blocks.filter(b => b.type === "Integrator").map(b => ({ block: b.id, port: "y" })));
+    const scopes = [{ signals: scopeSignals }];
 
-const scopes = [{ signals: scopeSignals }];
-
-    const graph = { blocks, wires, scopes };
-    document.getElementById("jsonOut").textContent = JSON.stringify(graph, null, 2);
-    return graph;
+    const graphOut = { blocks, wires, scopes };
+    document.getElementById('jsonOut').textContent = JSON.stringify(graphOut, null, 2);
+    return graphOut;
   };
 
-  
-  // Map server log keys (e.g., "2.y" or "2(TransferFunction).y") to a clear, human-friendly label like "TransferFunction (2).y"
+  // Map server log keys (e.g., "2.y" or "2(TransferFunction).y") to a clear, human-friendly label like "TF (2).y"
   function prettyLabelForLogKey(k) {
-    const s = String(k || "");
+    const s = String(k || '');
     let id = null, port = null, typeHint = null;
 
     let m = s.match(/^(\d+)\([^)]*\)\.([A-Za-z0-9_]+)$/);
@@ -979,541 +977,171 @@ const scopes = [{ signals: scopeSignals }];
 
     if (!id || !port) return s;
 
-    const n = editor.getNodeFromId(parseInt(id, 10));
-    const type = (n && n.name) ? n.name : (typeHint || "Block");
+    const n = graph.getCell(String(id));
+    const type = n ? n.get('blockType') : (typeHint || 'Block');
     return `${shortTypeName(type)} (${id}).${port}`;
   }
 
-window.simulate = async function simulate() {
-    const graph = window.exportGraph();
-    const t0 = parseFloat(document.getElementById("t0").value);
-    const t1 = parseFloat(document.getElementById("t1").value);
-    const dt = parseFloat(document.getElementById("dt").value);
+  window.simulate = async function simulate() {
+    const graphPayload = window.exportGraph();
+    const t0 = parseFloat(document.getElementById('t0').value);
+    const t1 = parseFloat(document.getElementById('t1').value);
+    const dt = parseFloat(document.getElementById('dt').value);
 
-    const payload = { graph, t0, t1, dt };
-    try{ toggleOutput(true); }catch(e){}
-    document.getElementById("out").textContent = "Running...";
-    if (typeof Plotly !== "undefined") { try { Plotly.purge("plot"); } catch(e){} }
+    const payload = { graph: graphPayload, t0, t1, dt };
+
+    try { toggleOutput(true); } catch(e) {}
+    document.getElementById('out').textContent = 'Running...';
+    if (typeof Plotly !== 'undefined') { try { Plotly.purge('plot'); } catch(e){} }
 
     try {
-      const res = await fetch("/simulate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      const res = await fetch('/simulate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
 
-let raw = "";
-try {
-  raw = await res.text();
-} catch (e) {
-  raw = "";
-}
+      let raw = '';
+      try { raw = await res.text(); } catch(e) { raw = ''; }
 
-if (!res.ok) {
-  const ct = res.headers.get("content-type") || "";
-  document.getElementById("out").textContent =
-    `HTTP ${res.status} ${res.statusText}
-content-type: ${ct}
-
-` + (raw || "(empty response)");
-  return;
-}
-
-// try parse JSON (now that we know it's OK)
-let data;
-try {
-  data = JSON.parse(raw);
-  try{ __lastSim = data; }catch(e){}
-} catch (e) {
-  document.getElementById("out").textContent =
-    "OK response but not JSON:\n" + raw;
-  return;
-}
-
-            const keys = Object.keys(data.logs || {});
-      // Plot with Plotly if available
-      if (keys.length && typeof Plotly !== "undefined") {
-        const traces = keys.map(k => ({ x: data.t, y: data.logs[k], mode: "lines", name: prettyLabelForLogKey(k) }));
-        Plotly.newPlot("plot", traces, { title: "Simulation results", xaxis: { title: "t" }, yaxis: { title: "value" } }, { responsive: true });
-        document.getElementById("out").textContent = `success=${data.success}
-message=${data.message}`;
-      } else {
-        let msg = `success=${data.success}
-message=${data.message}
-`;
-        if (keys.length) {
-          const k = keys[0];
-          msg += `first log: ${k}
-first 5: ${data.logs[k].slice(0,5).join(", ")}
-last: ${data.logs[k].slice(-1)[0]}`;
-        } else {
-          msg += "No logs.";
-        }
-        document.getElementById("out").textContent = msg;
+      if (!res.ok) {
+        const ct = res.headers.get('content-type') || '';
+        document.getElementById('out').textContent =
+          `HTTP ${res.status} ${res.statusText}\ncontent-type: ${ct}\n\n` + (raw || '(empty response)');
+        return;
       }
 
+      let data;
+      try {
+        data = JSON.parse(raw);
+        __lastSim = data;
+      } catch(e) {
+        document.getElementById('out').textContent = 'OK response but not JSON:\n' + raw;
+        return;
+      }
 
-    } catch (e) {
-      document.getElementById("out").textContent = "Fetch failed: " + e;
+      const keys = Object.keys(data.logs || {});
+      if (keys.length && typeof Plotly !== 'undefined') {
+        const traces = keys.map(k => ({ x: data.t, y: data.logs[k], mode: 'lines', name: prettyLabelForLogKey(k) }));
+        Plotly.newPlot('plot', traces, { title: 'Simulation results', xaxis: { title: 't' }, yaxis: { title: 'value' } }, { responsive: true });
+        document.getElementById('out').textContent = `success=${data.success}\nmessage=${data.message}`;
+      } else {
+        let msg = `success=${data.success}\nmessage=${data.message}\n`;
+        if (keys.length) {
+          const k = keys[0];
+          msg += `first log: ${k}\nfirst 5: ${data.logs[k].slice(0,5).join(', ')}\nlast: ${data.logs[k].slice(-1)[0]}`;
+        } else {
+          msg += 'No logs.';
+        }
+        document.getElementById('out').textContent = msg;
+      }
+
+      refreshAllPlotNodeLabels();
+
+    } catch(e) {
+      document.getElementById('out').textContent = 'Fetch failed: ' + e;
     }
   };
 
-  
-  // =========================
-  // Orthogonal routing + grid + stubs + collision avoidance (checkpoint v1)
-  // =========================
-  const WIRE_GRID = 20;        // grid step for bends
-  const STUB = 30;             // horizontal stub length out of ports
-  const AVOID_MARGIN = 12;     // inflate node boxes for collision check
-  const CHANNEL_STEP = 40;     // search step for up/down channels
-  const CHANNEL_TRIES = 8;     // how many channels to try
-
-  const snap = (v) => Math.round(v / WIRE_GRID) * WIRE_GRID;
-
-  function screenToCanvas(clientX, clientY) {
-    const precanvas = document.querySelector(".drawflow .precanvas");
-    if (!precanvas) return { x: clientX, y: clientY };
-    const preRect = precanvas.getBoundingClientRect();
-    const tf = getComputedStyle(precanvas).transform;
-    const inv = (tf && tf !== "none") ? new DOMMatrixReadOnly(tf).inverse() : new DOMMatrixReadOnly().inverse();
-    const p = new DOMPoint(clientX - preRect.left, clientY - preRect.top).matrixTransform(inv);
-    return { x: p.x, y: p.y };
-  }
-
-  function portCenterCanvas(portEl) {
-    const r = portEl.getBoundingClientRect();
-    return screenToCanvas(r.left + r.width / 2, r.top + r.height / 2);
-  }
-
-  function rectsOfNodesCanvas(exceptNodeIds = new Set()) {
-    const precanvas = document.querySelector(".drawflow .precanvas");
-    if (!precanvas) return [];
-    const preRect = precanvas.getBoundingClientRect();
-    const tf = getComputedStyle(precanvas).transform;
-    const inv = (tf && tf !== "none") ? new DOMMatrixReadOnly(tf).inverse() : new DOMMatrixReadOnly().inverse();
-
-    const rects = [];
-    document.querySelectorAll(".drawflow-node").forEach(nodeEl => {
-      const idAttr = nodeEl.getAttribute("id") || "";
-      const m = idAttr.match(/^node-(\d+)$/);
-      if (!m) return;
-      const nodeId = m[1];
-      if (exceptNodeIds.has(String(nodeId))) return;
-
-      const r = nodeEl.getBoundingClientRect();
-      const p1 = new DOMPoint(r.left - preRect.left, r.top - preRect.top).matrixTransform(inv);
-      const p2 = new DOMPoint(r.right - preRect.left, r.bottom - preRect.top).matrixTransform(inv);
-
-      const x1 = Math.min(p1.x, p2.x) - AVOID_MARGIN;
-      const y1 = Math.min(p1.y, p2.y) - AVOID_MARGIN;
-      const x2 = Math.max(p1.x, p2.x) + AVOID_MARGIN;
-      const y2 = Math.max(p1.y, p2.y) + AVOID_MARGIN;
-
-      rects.push({ nodeId, x1, y1, x2, y2 });
-    });
-    return rects;
-  }
-
-  function segIntersectsRect(ax, ay, bx, by, r) {
-    // Only orthogonal segments supported
-    if (ax === bx) { // vertical
-      const x = ax;
-      const yMin = Math.min(ay, by), yMax = Math.max(ay, by);
-      return (x >= r.x1 && x <= r.x2 && yMax >= r.y1 && yMin <= r.y2);
-    }
-    if (ay === by) { // horizontal
-      const y = ay;
-      const xMin = Math.min(ax, bx), xMax = Math.max(ax, bx);
-      return (y >= r.y1 && y <= r.y2 && xMax >= r.x1 && xMin <= r.x2);
-    }
-    return false;
-  }
-
-  function pathIntersectsAnyRect(points, rects) {
-    for (let i = 0; i < points.length - 1; i++) {
-      const a = points[i], b = points[i + 1];
-      for (const r of rects) {
-        if (segIntersectsRect(a.x, a.y, b.x, b.y, r)) return true;
-      }
-    }
-    return false;
-  }
-
-  function pointsToD(points) {
-    return "M " + points.map(p => `${p.x} ${p.y}`).join(" L ");
-  }
-
-  function findPort(nodeId, kind, portName) {
-    // kind: "output" or "input"
-    const nodeEl = document.getElementById(`node-${nodeId}`);
-    if (!nodeEl) return null;
-    if (kind === "output") {
-      return nodeEl.querySelector(`.outputs .output[data-output="${portName}"]`) || null;
-    } else {
-      return nodeEl.querySelector(`.inputs .input[data-input="${portName}"]`) || null;
-    }
-  }
-
-  function buildPoints(outPortEl, inPortEl, snapBends, meta) {
-    const A = portCenterCanvas(outPortEl);
-    const B = portCenterCanvas(inPortEl);
-
-    const A1 = { x: A.x + STUB, y: A.y };
-    const B1 = { x: B.x - STUB, y: B.y };
-
-    const mxBase = (A1.x + B1.x) / 2;
-    const mx = snapBends ? snap(mxBase) : mxBase;
-
-    const except = new Set();
-    if (meta?.node_out) except.add(String(meta.node_out));
-    if (meta?.node_in) except.add(String(meta.node_in));
-    const rects = rectsOfNodesCanvas(except);
-
-    // Candidate 1: classic S-route via mx
-    const cand1 = [
-      A, A1,
-      { x: mx, y: A1.y },
-      { x: mx, y: B1.y },
-      B1, B
-    ];
-    if (!pathIntersectsAnyRect(cand1, rects)) return cand1;
-
-    // Candidates 2..: channel above/below
-    const yA = snapBends ? snap(A1.y) : A1.y;
-    const yB = snapBends ? snap(B1.y) : B1.y;
-    const midY = (yA + yB) / 2;
-    const midY0 = snapBends ? snap(midY) : midY;
-
-    for (let k = 0; k < CHANNEL_TRIES; k++) {
-      const dy = CHANNEL_STEP * (k + 1);
-      const yUp = snapBends ? snap(midY0 - dy) : (midY0 - dy);
-      const yDn = snapBends ? snap(midY0 + dy) : (midY0 + dy);
-
-      const candUp = [
-        A, A1,
-        { x: A1.x, y: yUp },
-        { x: B1.x, y: yUp },
-        B1, B
-      ];
-      if (!pathIntersectsAnyRect(candUp, rects)) return candUp;
-
-      const candDn = [
-        A, A1,
-        { x: A1.x, y: yDn },
-        { x: B1.x, y: yDn },
-        B1, B
-      ];
-      if (!pathIntersectsAnyRect(candDn, rects)) return candDn;
-    }
-
-    // Fallback
-    return cand1;
-  }
-
-  function updateOrthogonalConnections(snapBends = true) {
-    document.querySelectorAll(".connection").forEach(conn => {
-      const nodeOut = conn.dataset.node_out || conn.getAttribute("data-node_out");
-      const nodeIn  = conn.dataset.node_in  || conn.getAttribute("data-node_in");
-      const outName = conn.dataset.output   || conn.getAttribute("data-output");
-      const inName  = conn.dataset.input    || conn.getAttribute("data-input");
-      if (!nodeOut || !nodeIn || !outName || !inName) return;
-
-      const outPort = findPort(nodeOut, "output", outName);
-      const inPort  = findPort(nodeIn,  "input",  inName);
-      if (!outPort || !inPort) return;
-
-      const points = findPoints(outPort, inPort, snapBends, { node_out: nodeOut, node_in: nodeIn });
-
-      // Drawflow renders multiple paths per connection (visual + hit-area).
-      // Keep ALL of them in sync, otherwise selection/delete can behave oddly until a node moves.
-      const d = pointsToD(points);
-      conn.querySelectorAll("path").forEach(p => {
-        try { p.setAttribute("d", d); } catch (e) {}
-      });
-    });
-  }
-
-  // alias to avoid accidental name collision
-  const findPoints = buildPoints;
-
-  // Smooth while dragging nodes; snap on mouseup
-  editor.on("nodeMoved", () => updateOrthogonalConnections(false));
-  document.addEventListener("mouseup", () => updateOrthogonalConnections(true));
-
-  // Force endpoints to port centers while dragging a wire
-  let __draggingWire = false;
-  let __raf = null;
-
-  function rafTick() {
-    if (__draggingWire) {
-      updateOrthogonalConnections(false);
-      __raf = requestAnimationFrame(rafTick);
-    } else {
-      __raf = null;
-    }
-  }
-
-  document.addEventListener("mousedown", (ev) => {
-    const t = ev.target;
-    if (t && (t.classList?.contains("output") || t.classList?.contains("input"))) {
-      __draggingWire = true;
-      if (!__raf) __raf = requestAnimationFrame(rafTick);
-    }
-  });
-
-  document.addEventListener("mouseup", () => {
-    __draggingWire = false;
-    updateOrthogonalConnections(true);
-  });
-
-  // Also refresh after connections change / zoom / pan
-  function refreshAllPlotNodeLabels() {
-    try {
-      const df = editor.export();
-      const nodesObj = df.drawflow.Home.data || {};
-      for (const [nid, node] of Object.entries(nodesObj)) {
-        if (node && node.name === "Plot") refreshNodeHtml(parseInt(nid, 10));
-      }
-    } catch (e) {}
-  }
-
-  editor.on("connectionCreated", () => { updateOrthogonalConnections(true); refreshAllPlotNodeLabels(); });
-  editor.on("connectionRemoved", () => { updateOrthogonalConnections(true); refreshAllPlotNodeLabels(); });
-  try { editor.on("zoom", () => updateOrthogonalConnections(false)); } catch (e) {}
-
-
   // ===== Double-click on Plot block: open its own plot window =====
   function openPlotForPlotNode(plotNodeId) {
-    const n = editor.getNodeFromId(plotNodeId);
-    const label = (n && n.data && n.data.params && typeof n.data.params.label === "string" && n.data.params.label.trim())
-      ? n.data.params.label.trim()
-      : `Plot ${plotNodeId}`;
+    const el = graph.getCell(String(plotNodeId));
+    if (!el) return;
 
-    const titleEl = document.getElementById("plotTitle");
+    const p = el.get('params') || {};
+    const label = (typeof p.label === 'string' && p.label.trim()) ? p.label.trim() : `Plot ${plotNodeId}`;
+
+    const titleEl = document.getElementById('plotTitle');
     if (titleEl) titleEl.textContent = label;
 
-    // If no sim yet, run it first
     if (!__lastSim || !__lastSim.t || !__lastSim.logs) {
-      try{ toggleOutput(true); }catch(e){}
+      try { toggleOutput(true); } catch(e) {}
       window.simulate().then(() => setTimeout(() => openPlotForPlotNode(plotNodeId), 0));
       return;
     }
 
-const keys = Object.keys(__lastSim.logs || {});
-if (!keys.length) return;
+    const keys = Object.keys(__lastSim.logs || {});
+    if (!keys.length) return;
 
-// Resolve which signal belongs to THIS Plot block (based on its input connection).
-const key = (function resolveKeyForPlot(plotNodeId) {
-  const pNode = editor.getNodeFromId(plotNodeId);
-  if (!pNode || !pNode.inputs || !pNode.inputs.input_1) return keys[0];
+    // Resolve which signal belongs to THIS Plot block (based on its input link)
+    const inbound = graph.getConnectedLinks(el, { inbound: true });
+    const link = inbound.find(l => (l.get('target') || {}).port === 'u');
 
-  const conns = pNode.inputs.input_1.connections || [];
-  if (!conns.length) return keys[0];
+    let key = keys[0];
+    let pretty = '';
 
-  const c = conns[0];
-  const srcId = String(c.node);
-  const srcNode = editor.getNodeFromId(parseInt(srcId, 10));
-  const srcType = srcNode ? srcNode.name : "";
-  const srcSpec = srcType ? BLOCK_LIBRARY[srcType] : null;
+    if (link) {
+      const src = link.get('source') || {};
+      const srcId = String(src.id || '');
+      const port = String(src.port || 'y');
 
-  const outStr =
-    (typeof c.output === "string") ? c.output :
-    (typeof c.output_id === "string") ? c.output_id :
-    "output_1";
+      const srcEl = graph.getCell(srcId);
+      const srcType = srcEl ? srcEl.get('blockType') : '';
 
-  const mo = String(outStr).match(/output_(\d+)/);
-  const outIndex = mo ? (parseInt(mo[1], 10) - 1) : 0;
-  const port = (srcSpec && srcSpec.outputs && srcSpec.outputs[outIndex]) ? srcSpec.outputs[outIndex] : "y";
+      const candidates = [
+        `${srcId}(${srcType}).${port}`,
+        `${srcId}.${port}`,
+        `${srcType}(${srcId}).${port}`,
+        `${srcType}${srcId}.${port}`,
+        `${srcId}:${port}`,
+      ];
+      for (const cand of candidates) {
+        if (Object.prototype.hasOwnProperty.call(__lastSim.logs, cand)) { key = cand; break; }
+      }
 
-  // Try a few common server key formats, then fall back to fuzzy match.
-  const candidates = [
-    `${srcId}(${srcType}).${port}`,
-    `${srcId}.${port}`,
-    `${srcType}(${srcId}).${port}`,
-    `${srcType}${srcId}.${port}`,
-    `${srcId}:${port}`,
-  ];
-  for (const cand of candidates) {
-    if (Object.prototype.hasOwnProperty.call(__lastSim.logs, cand)) return cand;
-  }
+      const re1 = new RegExp(`^${srcId}\\([^)]*\\)\\.${port}$`);
+      for (const k of keys) if (re1.test(k)) { key = k; break; }
 
-  // Fuzzy: match by id + port, optionally type in parentheses.
-  const re1 = new RegExp(`^${srcId}\\([^)]*\\)\\.${port}$`);
-  for (const k of keys) if (re1.test(k)) return k;
+      pretty = `${shortTypeName(srcType)} (${srcId}).${port}`;
+    }
 
-  const re2 = new RegExp(`(^|[^0-9])${srcId}([^0-9]|$)`);
-  for (const k of keys) {
-    if (k.includes(`.${port}`) && re2.test(k)) return k;
-  }
+    const metaEl = document.getElementById('plotMeta');
+    if (metaEl) {
+      const txt = pretty ? ((pretty === key) ? `Signal: ${pretty}` : `Signal: ${pretty}  (log key: ${key})`) : `Signal log key: ${key}`;
+      metaEl.textContent = txt;
+    }
 
-  return keys[0];
-})(plotNodeId);
-
-const metaEl = document.getElementById("plotMeta");
-if (metaEl) {
-  const pretty = computePlotSignalPretty(plotNodeId) || key;
-  // Show both: clear origin + actual server log key (useful for debugging)
-  metaEl.textContent = (pretty === key) ? `Signal: ${pretty}` : `Signal: ${pretty}  (log key: ${key})`;
-}
     togglePlotWindow(true);
-    if (typeof Plotly !== "undefined") {
+    if (typeof Plotly !== 'undefined') {
       Plotly.newPlot(
-        "plotCanvas",
-        [{ x: __lastSim.t, y: __lastSim.logs[key], mode: "lines", name: (computePlotSignalPretty(plotNodeId) || prettyLabelForLogKey(key) || key) }],
-        { title: label, xaxis: { title: "t" }, yaxis: { title: "value" } },
+        'plotCanvas',
+        [{ x: __lastSim.t, y: __lastSim.logs[key], mode: 'lines', name: (pretty || prettyLabelForLogKey(key) || key) }],
+        { title: label, xaxis: { title: 't' }, yaxis: { title: 'value' } },
         { responsive: true }
       );
     }
   }
 
-  document.addEventListener("dblclick", (ev) => {
-    const nodeEl = ev.target && ev.target.closest ? ev.target.closest(".drawflow-node") : null;
-    if (!nodeEl) return;
-    const m = (nodeEl.id || "").match(/^node-(\d+)$/);
-    if (!m) return;
-    const id = parseInt(m[1], 10);
-    const node = editor.getNodeFromId(id);
-    if (node && node.name === "Plot") {
-      openPlotForPlotNode(id);
-    }
+  paper.on('element:pointerdblclick', (elementView) => {
+    const el = elementView.model;
+    if (el && el.get('blockType') === 'Plot') openPlotForPlotNode(String(el.id));
   });
 
+  // ===== Auto-create a default model on load (Const -> TF -> Plot) =====
+  try {
+    const idConst = createBlockCell('Constant', 100, 140, { value: 1.0 }).id;
+    const idTF    = createBlockCell('TransferFunction', 380, 140, { num: '1', den: '1,1' }).id;
+    const idPlot  = createBlockCell('Plot', 660, 140, { label: '' }).id;
 
-// ---- Auto-create a default model on load (Constant -> Integrator) ----
-// ---- Auto-create a default model on load (Constant -> Integrator -> Plot) ----
-try {
-  // vytvoření bloků s pevnými pozicemi
-  const idConst = editor.addNode(
-    "Constant", 0, 1,
-    100, 140,
-    "Constant",
-    { blockType: "Constant", params: { value: 1.0 } },
-    nodeHtml("Constant", { value: 1.0 })
-  );
+    const l1 = paper.options.defaultLink();
+    l1.source({ id: String(idConst), port: 'y' });
+    l1.target({ id: String(idTF), port: 'u' });
+    l1.addTo(graph);
 
-  const idTF = editor.addNode(
-    "TransferFunction", 1, 1,
-    380, 140,
-    "TransferFunction",
-    { blockType: "TransferFunction", params: { num: "1", den: "1,1" } },
-    nodeHtml("TransferFunction", { num: "1", den: "1,1" })
-  );
+    const l2 = paper.options.defaultLink();
+    l2.source({ id: String(idTF), port: 'y' });
+    l2.target({ id: String(idPlot), port: 'u' });
+    l2.addTo(graph);
 
-  const idPlot = editor.addNode(
-    "Plot", 1, 0,
-    660, 140,
-    "Plot",
-    { blockType: "Plot", params: { label: "" } },
-    nodeHtml("Plot", { label: "" })
-  );
+    refreshAllPlotNodeLabels();
+    setStatus('Default model added: Constant → Transfer Function → Plot');
 
-  // ensure titles show Type (ID)
-  refreshNodeHtml(idConst);
-  refreshNodeHtml(idTF);
-  refreshNodeHtml(idPlot);
+  } catch(e) {
+    setStatus('JS ERROR while auto-adding model: ' + e);
+    console.error(e);
+  }
 
-  // propojení
-  editor.addConnection(idConst, idTF, "output_1", "input_1");
-  editor.addConnection(idTF, idPlot, "output_1", "input_1");
-
-  // Update Plot block text to show full signal origin after wires exist
-  try { refreshNodeHtml(idPlot); } catch (e) {}
-
-  // přepočet drátů (kvůli custom routingu)
-  // Do it twice (next tick + next animation frame) so connection SVG paths definitely exist.
-  setTimeout(() => {
-    updateOrthogonalConnections(true);
-    requestAnimationFrame(() => updateOrthogonalConnections(true));
-  }, 0);
-
-  setStatus("Default model added: Constant → Transfer Function → Plot");
-  console.log("After adding default model:", editor.export());
-
-} catch (e) {
-  setStatus("JS ERROR while auto-adding model: " + e);
-  console.error(e);
-}
-
-  // ===== Hover highlight: hovering a port OR wire highlights connected wires =====
-  (function setupPortHoverHighlight(){
-    const root = document.getElementById("drawflow");
-    if (!root) return;
-
-    let highlighted = [];
-
-    function clearHighlight(){
-      highlighted.forEach(el => el.classList.remove("is-highlight"));
-      highlighted = [];
-    }
-
-    function addHighlight(conns){
-      clearHighlight();
-      conns.forEach(el => el.classList.add("is-highlight"));
-      highlighted = conns;
-    }
-
-    function connectionsForPort(portEl){
-      const nodeEl = portEl.closest(".drawflow-node");
-      if (!nodeEl) return [];
-      const m = (nodeEl.id || "").match(/^node-(\d+)$/);
-      if (!m) return [];
-      const nodeId = m[1];
-
-      const isOut = portEl.classList.contains("output");
-      const key = isOut ? (portEl.getAttribute("data-output") || "") : (portEl.getAttribute("data-input") || "");
-      if (!key) return [];
-
-      const conns = Array.from(document.querySelectorAll("#drawflow .connection")).filter(c => {
-        const no = c.getAttribute("data-node_out");
-        const ni = c.getAttribute("data-node_in");
-        const o  = c.getAttribute("data-output");
-        const i  = c.getAttribute("data-input");
-        return isOut
-          ? (no === nodeId && o === key)
-          : (ni === nodeId && i === key);
-      });
-
-      return conns;
-    }
-
-    function highlightPort(portEl){
-      const conns = connectionsForPort(portEl);
-      if (conns.length) addHighlight(conns);
-      else clearHighlight();
-    }
-
-    function highlightWire(connEl){
-      if (!connEl) return;
-      addHighlight([connEl]);
-    }
-
-    // Hover on ports and wires
-    root.addEventListener("pointerover", (ev) => {
-      const port = ev.target && ev.target.closest ? ev.target.closest(".output, .input") : null;
-      if (port) {
-        highlightPort(port);
-        return;
-      }
-      const conn = ev.target && ev.target.closest ? ev.target.closest(".connection") : null;
-      if (conn) {
-        highlightWire(conn);
-        return;
-      }
-    });
-
-    root.addEventListener("pointerout", (ev) => {
-      const stillOn = ev.relatedTarget && ev.relatedTarget.closest ? ev.relatedTarget.closest(".output, .input, .connection") : null;
-      if (stillOn) return;
-      clearHighlight();
-    });
-
-    // Clear on interactions that may leave stale highlights
-    root.addEventListener("mousedown", clearHighlight);
-    root.addEventListener("wheel", clearHighlight, { passive: true });
-    document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") clearHighlight();
-    });
-  })();
+  setStatus('Editor started.');
 });
 </script>
 </body>

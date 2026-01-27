@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import mimetypes
+mimetypes.add_type("text/javascript", ".mjs")
+
 from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple, Callable, Optional, Set
 from flask import Flask, request, jsonify
