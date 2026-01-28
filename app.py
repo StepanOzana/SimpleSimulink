@@ -12,6 +12,32 @@ import traceback
 import numpy as np
 from scipy.integrate import solve_ivp
 from scipy.signal import tf2ss
+import types
+
+# ----------------------------
+# Python S-Function sandbox helpers
+# ----------------------------
+
+_ALLOWED_IMPORTS: Set[str] = {"math", "numpy", "scipy", "random", "time", "statistics","control"}
+
+def _safe_import(name, globals=None, locals=None, fromlist=(), level=0):
+    top = name.split(".")[0]
+    if top not in _ALLOWED_IMPORTS:
+        raise ImportError(f"Import '{top}' is not allowed in PythonSFunction.")
+    return __import__(name, globals, locals, fromlist, level)
+
+_SAFE_BUILTINS = {
+    # basics
+    "abs": abs, "min": min, "max": max, "sum": sum, "len": len,
+    "range": range, "enumerate": enumerate,
+    "int": int, "float": float, "bool": bool,
+    "list": list, "tuple": tuple, "dict": dict, "set": set,
+    "zip": zip,
+    # errors
+    "Exception": Exception, "ValueError": ValueError, "TypeError": TypeError,
+    # import (restricted)
+    "__import__": _safe_import,
+}
 
 app = Flask(__name__)
 
@@ -72,6 +98,41 @@ BLOCK_SPECS = {
         "inputs": ["u"],
         "outputs": ["y"],
         "params": {"num": "1", "den": "1,1"},
+    },
+
+    # User-programmable continuous-time block (Simulink S-Function-like, simplified)
+    # Provide Python code that defines:
+    #   def outputs(t, x, u, p):
+    #       return y
+    #   def derivatives(t, x, u, p):
+    #       return dx
+    # where:
+    #   t: float
+    #   x: numpy array (n_states,)
+    #   u: float (input)
+    #   p: dict (params)
+    # Return values may be scalar or 1D array/list.
+    "PythonSFunction": {
+        "inputs": ["u"],
+        "outputs": ["y"],
+        "params": {
+            "n_states": 1,
+            "x0": "0",
+            "code": (
+                "# Define two functions: outputs(t, x, u, p) and derivatives(t, x, u, p)\n"
+                "# Example: first-order system x' = -a*x + b*u; y = x\n"
+                "import numpy as np\n"
+                "def outputs(t, x, u, p):\n"
+                "    return float(x[0])\n"
+                "def derivatives(t, x, u, p):\n"
+                "    a = float(p.get('a', 1.0))\n"
+                "    b = float(p.get('b', 1.0))\n"
+                "    return np.array([-a*x[0] + b*u], dtype=float)\n"
+            ),
+            # optional extra user params can be added and will be passed in p
+            "a": 1.0,
+            "b": 1.0,
+        },
     },
 }
 
@@ -254,6 +315,10 @@ def eval_block(
     t: float,
     signals: Dict[Tuple[str, str], float],
     input_map: Dict[Tuple[str, str], Tuple[str, str]],
+    *,
+    x: Optional[np.ndarray] = None,
+    state_slices: Optional[Dict[str, slice]] = None,
+    sfunc_exec: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> None:
     btype = block["type"]
 
@@ -308,6 +373,25 @@ def eval_block(
             lo, hi = hi, lo
         signals[out_key(bid, "y")] = float(min(max(u, lo), hi))
 
+    elif btype == "PythonSFunction":
+        if x is None or state_slices is None or sfunc_exec is None:
+            raise GraphError("PythonSFunction evaluation requires state")
+        sl = state_slices[bid]
+        x_sf = x[sl].reshape(-1)
+        u = float(inp("u"))
+        p = dict(block.get("params", {}) or {})
+        out_fn = sfunc_exec[bid]["outputs"]
+        try:
+            y = out_fn(float(t), x_sf, u, p)
+        except Exception as e:
+            raise GraphError(f"PythonSFunction {bid}: outputs() error: {type(e).__name__}: {e}")
+        # accept scalar or length-1 vector
+        if isinstance(y, (list, tuple, np.ndarray)):
+            yv = float(np.array(y, dtype=float).reshape(-1)[0])
+        else:
+            yv = float(y)
+        signals[out_key(bid, "y")] = yv
+
     else:
         raise GraphError(f"eval_block not implemented for type {btype}")
 
@@ -320,12 +404,15 @@ def compile_model(graph: Dict[str, Any]) -> Dict[str, Any]:
     deps = build_dependency_graph(blocks_by_id, wires)
     algebraic_order = topo_sort_algebraic(blocks_by_id, deps)
 
-    # Stateful blocks: Integrator + TransferFunction
+    # Stateful blocks: Integrator + TransferFunction + PythonSFunction
     integrators = [bid for bid, b in blocks_by_id.items() if b["type"] == "Integrator"]
     tfs = [bid for bid, b in blocks_by_id.items() if b["type"] == "TransferFunction"]
+    sfuncs = [bid for bid, b in blocks_by_id.items() if b["type"] == "PythonSFunction"]
 
-    # Build a packed state vector: all integrators first, then each TF's internal states
+    # Build a packed state vector: all integrators first, then each TF's internal states,
+    # then PythonSFunction internal states.
     tf_ss: Dict[str, Dict[str, Any]] = {}
+    sfunc_exec: Dict[str, Dict[str, Any]] = {}
 
     # helper to parse CSV coefficient lists
     def _parse_coeff_list(s: Any) -> List[float]:
@@ -382,6 +469,65 @@ def compile_model(graph: Dict[str, Any]) -> Dict[str, Any]:
         cursor += n
         tf_ss[bid] = {"A": A, "B": B, "C": C}
 
+    # PythonSFunction states + code compilation
+    def _parse_x0_any(x0v: Any, n_states: int) -> np.ndarray:
+        if n_states <= 0:
+            return np.zeros((0,), dtype=float)
+        # allow scalar, list, or CSV string
+        if isinstance(x0v, (int, float)):
+            return np.full((n_states,), float(x0v), dtype=float)
+        if isinstance(x0v, (list, tuple)):
+            arr = np.array([float(v) for v in x0v], dtype=float).reshape(-1)
+            if arr.size == 1 and n_states > 1:
+                return np.full((n_states,), float(arr[0]), dtype=float)
+            if arr.size != n_states:
+                raise GraphError(f"PythonSFunction: x0 size {arr.size} does not match n_states={n_states}")
+            return arr
+        parts = [p.strip() for p in str(x0v or "").split(",") if p.strip()]
+        if not parts:
+            return np.zeros((n_states,), dtype=float)
+        arr = np.array([float(v) for v in parts], dtype=float).reshape(-1)
+        if arr.size == 1 and n_states > 1:
+            return np.full((n_states,), float(arr[0]), dtype=float)
+        if arr.size != n_states:
+            raise GraphError(f"PythonSFunction: x0 size {arr.size} does not match n_states={n_states}")
+        return arr
+
+    def _compile_sfunc(code: str) -> Dict[str, Any]:
+        """Compile user code with a small, explicit API."""
+        if not isinstance(code, str) or not code.strip():
+            raise GraphError("PythonSFunction: code is empty")
+
+        # Restrict builtins: enough for basic math, but avoid file/network.
+        safe_builtins = dict(_SAFE_BUILTINS)
+        env: Dict[str, Any] = {
+            "__builtins__": safe_builtins,
+            "np": np,
+        }
+        loc: Dict[str, Any] = {}
+        try:
+            compiled = compile(code, "<PythonSFunction>", "exec")
+            exec(compiled, env, loc)
+        except Exception as e:
+            raise GraphError(f"PythonSFunction: code error: {type(e).__name__}: {e}")
+
+        out_fn = loc.get("outputs") or env.get("outputs")
+        der_fn = loc.get("derivatives") or env.get("derivatives")
+        if not callable(out_fn) or not callable(der_fn):
+            raise GraphError("PythonSFunction: code must define callables 'outputs' and 'derivatives'")
+        return {"outputs": out_fn, "derivatives": der_fn}
+
+    for bid in sfuncs:
+        b = blocks_by_id[bid]
+        n_states = int(get_param(b, "n_states", 1) or 1)
+        if n_states < 0:
+            raise GraphError(f"PythonSFunction {bid}: n_states must be >= 0")
+        state_slices[bid] = slice(cursor, cursor + n_states)
+        cursor += n_states
+
+        code = str(get_param(b, "code", ""))
+        sfunc_exec[bid] = _compile_sfunc(code)
+
     state_index = {bid: i for i, bid in enumerate(integrators)}
 
     # initial state vector from x0 params
@@ -390,6 +536,16 @@ def compile_model(graph: Dict[str, Any]) -> Dict[str, Any]:
         sl = state_slices[bid]
         x0[sl.start] = float(get_param(blocks_by_id[bid], "x0", 0.0))
     # TF initial states default to zeros; you can add x0 later as an enhancement
+
+    # PythonSFunction initial states
+    for bid in sfuncs:
+        sl = state_slices[bid]
+        n_states = sl.stop - sl.start
+        if n_states <= 0:
+            continue
+        b = blocks_by_id[bid]
+        x0_vec = _parse_x0_any(get_param(b, "x0", "0"), n_states)
+        x0[sl] = x0_vec
 
     # validate scopes (optional)
     for ref in scope_refs:
@@ -405,9 +561,11 @@ def compile_model(graph: Dict[str, Any]) -> Dict[str, Any]:
         "algebraic_order": algebraic_order,
         "integrators": integrators,
         "tfs": tfs,
+        "sfuncs": sfuncs,
         "state_index": state_index,
         "state_slices": state_slices,
         "tf_ss": tf_ss,
+        "sfunc_exec": sfunc_exec,
         "x0": x0,
         "scope_refs": scope_refs,
     }
@@ -419,8 +577,10 @@ def make_rhs(compiled: Dict[str, Any]) -> Callable[[float, np.ndarray], np.ndarr
     algebraic_order = compiled["algebraic_order"]
     integrators = compiled["integrators"]
     tfs = compiled["tfs"]
+    sfuncs = compiled.get("sfuncs", [])
     state_slices = compiled["state_slices"]
     tf_ss = compiled["tf_ss"]
+    sfunc_exec = compiled.get("sfunc_exec", {})
 
     def rhs(t: float, x: np.ndarray) -> np.ndarray:
         signals: Dict[Tuple[str, str], float] = {}
@@ -440,7 +600,16 @@ def make_rhs(compiled: Dict[str, Any]) -> Callable[[float, np.ndarray], np.ndarr
 
         # compute algebraic blocks in topo order
         for bid in algebraic_order:
-            eval_block(bid, blocks_by_id[bid], t, signals, input_map)
+            eval_block(
+                bid,
+                blocks_by_id[bid],
+                t,
+                signals,
+                input_map,
+                x=x,
+                state_slices=state_slices,
+                sfunc_exec=sfunc_exec,
+            )
 
         # compute derivatives for integrators
         dx = np.zeros_like(x)
@@ -462,6 +631,28 @@ def make_rhs(compiled: Dict[str, Any]) -> Callable[[float, np.ndarray], np.ndarr
             x_tf = x[sl].reshape(-1, 1)
             dx_tf = (A @ x_tf) + (B * u)
             dx[sl] = dx_tf.flatten()
+
+        # PythonSFunction derivatives: dx = derivatives(t, x_sf, u, p)
+        for bid in sfuncs:
+            sl = state_slices[bid]
+            n_states = sl.stop - sl.start
+            if n_states <= 0:
+                continue
+            src = input_map[(bid, "u")]
+            u = float(signals[out_key(src[0], src[1])])
+            x_sf = x[sl].reshape(-1)
+            p = dict(blocks_by_id[bid].get("params", {}) or {})
+            der_fn = sfunc_exec[bid]["derivatives"]
+            try:
+                dx_sf = der_fn(float(t), x_sf, u, p)
+            except Exception as e:
+                raise GraphError(f"PythonSFunction {bid}: derivatives() error: {type(e).__name__}: {e}")
+            arr = np.array(dx_sf, dtype=float).reshape(-1)
+            if arr.size == 1 and n_states > 1:
+                arr = np.full((n_states,), float(arr[0]), dtype=float)
+            if arr.size != n_states:
+                raise GraphError(f"PythonSFunction {bid}: derivatives() returned size {arr.size}, expected {n_states}")
+            dx[sl] = arr
         return dx
 
     return rhs
@@ -515,8 +706,8 @@ def simulate(graph: Dict[str, Any], t0: float, t1: float, dt: float, solver: str
     x0 = compiled["x0"]
     t_eval = np.arange(t0, t1 + 1e-12, dt)
 
-    solver_l = (solver or 'rk45').strip().lower()
-    if solver_l in ('euler', 'rk2', 'heun', 'rk4'):
+    solver_l = (solver or 'rk45').lower()
+    if solver_l in ('euler','rk2','heun','rk4'):
         t_out, y_out = _integrate_fixed_step(rhs, x0, t_eval, solver_l)
         sol = type('Sol', (), {})()
         sol.t = t_out
@@ -524,18 +715,18 @@ def simulate(graph: Dict[str, Any], t0: float, t1: float, dt: float, solver: str
         sol.success = True
         sol.message = f'fixed-step {solver_l}'
     else:
-        # Delegate to SciPy solve_ivp (variable-step) for methods like RK45, Radau, BDF...
-        # We still report results on the requested t_eval grid.
+        # Delegate to SciPy solve_ivp (variable-step). SciPy expects specific method names
+        # like 'RK45', 'Radau', 'BDF', ... (case-sensitive).
         method_map = {
-            'rk45': 'RK45',
-            'rk23': 'RK23',
-            'dop853': 'DOP853',
-            'radau': 'Radau',
-            'bdf': 'BDF',
-            'lsoda': 'LSODA',
+            "rk23": "RK23",
+            "rk45": "RK45",
+            "dop853": "DOP853",
+            "radau": "Radau",
+            "bdf": "BDF",
+            "lsoda": "LSODA",
         }
-        scipy_method = method_map.get(solver_l, solver)
-        sol = solve_ivp(rhs, (t0, t1), x0, t_eval=t_eval, method=scipy_method, rtol=1e-6, atol=1e-9)
+        method = method_map.get(solver_l, solver)
+        sol = solve_ivp(rhs, (t0, t1), x0, t_eval=t_eval, method=method, rtol=1e-6, atol=1e-9)
 
 
     # Recompute logged signals at each t_eval using the same evaluation
@@ -545,8 +736,10 @@ def simulate(graph: Dict[str, Any], t0: float, t1: float, dt: float, solver: str
     algebraic_order = compiled["algebraic_order"]
     integrators = compiled["integrators"]
     tfs = compiled["tfs"]
+    sfuncs = compiled.get("sfuncs", [])
     state_slices = compiled["state_slices"]
     tf_ss = compiled["tf_ss"]
+    sfunc_exec = compiled.get("sfunc_exec", {})
     scope_refs: List[PortRef] = compiled["scope_refs"]
 
     logs: Dict[str, List[float]] = {}
@@ -574,7 +767,16 @@ def simulate(graph: Dict[str, Any], t0: float, t1: float, dt: float, solver: str
             signals[out_key(bid, "y")] = y
 
         for bid in algebraic_order:
-            eval_block(bid, blocks_by_id[bid], float(t), signals, input_map)
+            eval_block(
+                bid,
+                blocks_by_id[bid],
+                float(t),
+                signals,
+                input_map,
+                x=x,
+                state_slices=state_slices,
+                sfunc_exec=sfunc_exec,
+            )
 
         for ref in scope_refs:
             logs[sig_name(ref)].append(float(signals[out_key(ref.block, ref.port)]))
@@ -588,6 +790,71 @@ def simulate(graph: Dict[str, Any], t0: float, t1: float, dt: float, solver: str
         "success": bool(sol.success),
         "message": sol.message,
     }
+
+
+# ----------------------------
+# Simple Python Exec endpoint (sandboxed)
+# ----------------------------
+
+import io
+import ast
+import contextlib
+
+def _run_user_code(code: str) -> Dict[str, Any]:
+    """Execute user code in a restricted environment.
+
+    Returns dict with: stdout, result (repr), error (optional), ok (bool).
+    """
+    if not isinstance(code, str):
+        raise BadRequest("Field 'code' must be a string.")
+    if len(code) > 20000:
+        raise BadRequest("Code too large (max 20000 characters).")
+
+    # Restricted builtins + allowed imports (same as PythonSFunction)
+    env: Dict[str, Any] = {
+        "__builtins__": dict(_SAFE_BUILTINS, **{
+            "print": print,  # allow printing
+        }),
+        "np": np,
+    }
+    # Provide math as a convenience module (allowed by _safe_import)
+    try:
+        import math  # noqa: F401
+        env["math"] = math
+    except Exception:
+        pass
+
+    out = io.StringIO()
+
+    # Emulate REPL: if the last statement is an expression, evaluate it and return its repr
+    result_obj = None
+    try:
+        tree = ast.parse(code, mode="exec")
+        last_expr = None
+        if tree.body and isinstance(tree.body[-1], ast.Expr):
+            last_expr = tree.body.pop().value
+        body_mod = ast.Module(body=tree.body, type_ignores=[])
+        compiled_body = compile(body_mod, "<pyexec>", "exec")
+        compiled_expr = compile(ast.Expression(last_expr), "<pyexec>", "eval") if last_expr is not None else None
+
+        with contextlib.redirect_stdout(out):
+            exec(compiled_body, env, env)
+            if compiled_expr is not None:
+                result_obj = eval(compiled_expr, env, env)
+
+        return {
+            "ok": True,
+            "stdout": out.getvalue(),
+            "result": None if result_obj is None else repr(result_obj),
+        }
+    except Exception as e:
+        return {
+            "ok": False,
+            "stdout": out.getvalue(),
+            "error": f"{type(e).__name__}: {e}",
+            "traceback": traceback.format_exc(),
+        }
+
 
 # ----------------------------
 # Flask routes
@@ -647,6 +914,24 @@ def api_simulate():
     except Exception as e:
         traceback.print_exc()
         return jsonify({"error": f"{type(e).__name__}: {e}"}), 400
+
+
+@app.route("/pyexec", methods=["POST"])
+def api_pyexec():
+    """Execute small Python snippets from the UI (sandboxed)."""
+    try:
+        payload = request.get_json(force=True, silent=False)
+        if not isinstance(payload, dict):
+            return jsonify({"error": "Request JSON must be an object."}), 400
+        code = payload.get("code", "")
+        res = _run_user_code(code)
+        return jsonify(res)
+    except BadRequest as e:
+        return jsonify({"ok": False, "error": f"Bad request: {e}"}), 400
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}", "traceback": traceback.format_exc()}), 400
+
 
 from flask import send_from_directory
 

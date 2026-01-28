@@ -1,6 +1,12 @@
 {
   "version": 1,
-  "nextId": 12,
+  "nextId": 15,
+  "sim": {
+    "t0": 0,
+    "t1": 25,
+    "dt": 0.1,
+    "solver": "rk4"
+  },
   "elements": [
     {
       "id": "1",
@@ -19,7 +25,7 @@
         "num": "1",
         "den": "1,1"
       },
-      "x": 480,
+      "x": 400,
       "y": 140,
       "angle": 0
     },
@@ -27,9 +33,10 @@
       "id": "3",
       "type": "Plot",
       "params": {
-        "label": "TF (2).y"
+        "label": "TF (2).y",
+        "n": 1
       },
-      "x": 840,
+      "x": 720,
       "y": 140,
       "angle": 0
     },
@@ -59,7 +66,8 @@
       "id": "6",
       "type": "Plot",
       "params": {
-        "label": "TF (5).y"
+        "label": "TF (5).y",
+        "n": 1
       },
       "x": 840,
       "y": 300,
@@ -71,7 +79,7 @@
       "params": {
         "value": 1
       },
-      "x": 0,
+      "x": -20,
       "y": 400,
       "angle": 0
     },
@@ -82,7 +90,7 @@
         "num": "1",
         "den": "1,1"
       },
-      "x": 760,
+      "x": 720,
       "y": 460,
       "angle": 0
     },
@@ -92,7 +100,7 @@
       "params": {
         "k": -1
       },
-      "x": 500,
+      "x": 460,
       "y": 460,
       "angle": 0
     },
@@ -100,9 +108,10 @@
       "id": "10",
       "type": "Sum",
       "params": {
-        "signs": "++"
+        "signs": "++",
+        "n": 2
       },
-      "x": 240,
+      "x": 220,
       "y": 460,
       "angle": 0
     },
@@ -110,10 +119,46 @@
       "id": "11",
       "type": "Plot",
       "params": {
-        "label": "TF (8).y"
+        "label": "TF (8).y",
+        "n": 1
       },
-      "x": 1020,
+      "x": 1000,
       "y": 460,
+      "angle": 0
+    },
+    {
+      "id": "12",
+      "type": "Constant",
+      "params": {
+        "value": 0
+      },
+      "x": 40,
+      "y": 20,
+      "angle": 0
+    },
+    {
+      "id": "13",
+      "type": "PythonSFunction",
+      "params": {
+        "n_states": 2,
+        "x0": "0.5,0",
+        "a": 1,
+        "b": 1,
+        "code": "import numpy as np\n\ndef outputs(t, x, u, p):\n    # output = position\n    return float(x[0])\n\ndef derivatives(t, x, u, p):\n    # parameters\n    d = float(p.get('d', 0.2))   # damping\n    k = float(p.get('k', 1.0))   # nonlinear stiffness\n    b = float(p.get('b', 1.0))   # input gain\n\n    x1 = x[0]   # position\n    x2 = x[1]   # velocity\n\n    dx1 = x2\n    dx2 = -d * x2 - k * np.sin(x1) + b * u\n\n    return np.array([dx1, dx2], dtype=float)\n"
+      },
+      "x": 400,
+      "y": 20,
+      "angle": 0
+    },
+    {
+      "id": "14",
+      "type": "Plot",
+      "params": {
+        "n": 1,
+        "label": "(not connected)"
+      },
+      "x": 720,
+      "y": 20,
       "angle": 0
     }
   ],
@@ -141,36 +186,90 @@
     {
       "source": {
         "id": "4",
-        "magnet": "portHit",
         "port": "y"
       },
       "target": {
         "id": "5",
-        "magnet": "portHit",
         "port": "u"
       }
     },
     {
       "source": {
         "id": "5",
-        "magnet": "portBody",
         "port": "y"
       },
       "target": {
         "id": "6",
-        "magnet": "portHit",
         "port": "u"
       }
     },
     {
       "source": {
         "id": "1",
-        "magnet": "portBody",
         "port": "y"
       },
       "target": {
         "id": "4",
-        "magnet": "portHit",
+        "port": "u"
+      }
+    },
+    {
+      "source": {
+        "id": "10",
+        "port": "y"
+      },
+      "target": {
+        "id": "9",
+        "port": "u"
+      }
+    },
+    {
+      "source": {
+        "id": "9",
+        "port": "y"
+      },
+      "target": {
+        "id": "8",
+        "port": "u"
+      }
+    },
+    {
+      "source": {
+        "id": "8",
+        "port": "y"
+      },
+      "target": {
+        "id": "10",
+        "port": "u2"
+      }
+    },
+    {
+      "source": {
+        "id": "8",
+        "port": "y"
+      },
+      "target": {
+        "id": "11",
+        "port": "u"
+      }
+    },
+    {
+      "source": {
+        "id": "12",
+        "port": "y"
+      },
+      "target": {
+        "id": "13",
+        "port": "u"
+      }
+    },
+    {
+      "source": {
+        "id": "13",
+        "port": "y"
+      },
+      "target": {
+        "id": "14",
         "port": "u"
       }
     },
@@ -184,54 +283,6 @@
         "id": "10",
         "magnet": "portHit",
         "port": "u1"
-      }
-    },
-    {
-      "source": {
-        "id": "10",
-        "magnet": "portBody",
-        "port": "y"
-      },
-      "target": {
-        "id": "9",
-        "magnet": "portHit",
-        "port": "u"
-      }
-    },
-    {
-      "source": {
-        "id": "9",
-        "magnet": "portBody",
-        "port": "y"
-      },
-      "target": {
-        "id": "8",
-        "magnet": "portHit",
-        "port": "u"
-      }
-    },
-    {
-      "source": {
-        "id": "8",
-        "magnet": "portBody",
-        "port": "y"
-      },
-      "target": {
-        "id": "10",
-        "magnet": "portHit",
-        "port": "u2"
-      }
-    },
-    {
-      "source": {
-        "id": "8",
-        "magnet": "portBody",
-        "port": "y"
-      },
-      "target": {
-        "id": "11",
-        "magnet": "portHit",
-        "port": "u"
       }
     }
   ]

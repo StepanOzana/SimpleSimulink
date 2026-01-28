@@ -11,7 +11,7 @@
   <script src="/static/joint.js"></script>
 
   <!-- Plotly (kept as in your Drawflow version) -->
-  <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
+  <script src="/static/plotly-3.3.0.min.js"></script>
 
   <style>
     body { margin: 0; font-family: Arial, sans-serif; }
@@ -208,7 +208,94 @@
     }
 
 
-  </style>
+  
+    /* === Param modal (double-click block) === */
+    .modal-backdrop{
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.35);
+      display:none;
+      align-items:center;
+      justify-content:center;
+      z-index: 20000;
+      padding: 18px;
+      box-sizing:border-box;
+    }
+    .modal-backdrop.show{ display:flex; }
+    .modal{
+      width: min(720px, 96vw);
+      max-height: min(82vh, 900px);
+      background:#fff;
+      border:1px solid #e5e7eb;
+      border-radius: 16px;
+      box-shadow: 0 18px 60px rgba(0,0,0,0.25);
+      overflow:hidden;
+      display:flex;
+      flex-direction:column;
+    }
+    .modal-header{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      padding:12px 14px;
+      background:#f3f4f6;
+      border-bottom:1px solid #e5e7eb;
+      font-weight:800;
+    }
+    .modal-header .title{ font-size: 14px; }
+    .modal-body{
+      padding: 12px 14px;
+      overflow:auto;
+    }
+    .modal-footer{
+      padding: 10px 14px;
+      border-top:1px solid #e5e7eb;
+      display:flex;
+      gap:10px;
+      justify-content:flex-end;
+      background:#fff;
+    }
+    .modal .kv{ grid-template-columns: 140px 1fr; }
+    .modal textarea{ width:100%; padding:8px; border:1px solid #d1d5db; border-radius:10px; }
+    .modal input, .modal select{
+      width:100%;
+      padding:8px;
+      border:1px solid #d1d5db;
+      border-radius:10px;
+      box-sizing:border-box;
+    }
+
+
+    /* Python console opener */
+    #openPyConsoleBtn{
+      position: fixed;
+      right: 18px;
+      bottom: 18px;
+      z-index: 9998;
+      border: 1px solid #d1d5db;
+      background: #fff;
+      border-radius: 12px;
+      padding: 10px 12px;
+      cursor: pointer;
+      font-weight: 800;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.14);
+    }
+    #openPyConsoleBtn:hover{ background:#f9fafb; }
+
+    /* Python window sizing */
+    #pyWindow.floating-panel{ width: 520px; right: 18px; top: 60px; }
+    #pyCode{
+      width:100%;
+      box-sizing:border-box;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Courier New", monospace;
+      font-size:12px;
+      line-height:1.25;
+      padding:8px;
+      border:1px solid #d1d5db;
+      border-radius:10px;
+    }
+
+</style>
 </head>
 <body>
 <div class="layout">
@@ -243,6 +330,7 @@
         <div class="toolbar">
           <button class="blockbtn" onclick="addBlock('TransferFunction')">+ Transfer Function</button>
           <button class="blockbtn" onclick="addBlock('Integrator')">+ Integrator</button>
+          <button class="blockbtn" onclick="addBlock('PythonSFunction')">+ Python S-Function</button>
         </div>
       </details>
 
@@ -280,16 +368,18 @@
       <label>dt</label><input id="dt" type="number" value="0.1" step="0.01">
     </div>
 
-    <div class="section-title">Selected block</div>
-    <div id="selectedInfo" class="hint">Nothing selected.</div>
-    <div id="paramEditor"></div>
+    <div class="section-title">Nastavení bloků</div>
+    <div class="hint">Dvojklik na blok otevře okno s parametry.</div>
+    <div id="selectedInfo" class="hint" style="display:none">Nothing selected.</div>
+    <div id="paramEditor" style="display:none"></div>
 
     <button onclick="exportGraph()">Export JSON</button>
     <button onclick="simulate()">Simulate</button>
     <button id="toggleOutputBtn" style="margin-top:10px;" onclick="toggleOutput()">Show Output (F2)</button>
 
+</div>
 
-    <div id="tab_settings" class="lsection">
+<div id="tab_settings" class="lsection">
       <h3>Nastavení simulace</h3>
       <div class="kv">
         <label>Solver</label>
@@ -305,11 +395,11 @@
       <div class="hint" style="margin-top:8px;">
         Pozn.: Fixed-step metody používají přesně <b>dt</b>. solve_ivp metody jsou adaptivní, ale výsledky jsou vzorkované na t_eval.
       </div>
-    </div>
+    
+</div>
 
-    </div>
-
-    <p class="hint">
+  
+<p class="hint">
       Tip: Klikni na blok pro editaci parametrů vlevo. Propoj porty tažením z výstupu do vstupu. Dvojklik na drát přidá zlom (vertex), který lze táhnout. Navíc: můžeš chytnout drát kdekoliv a tahem vytvořit/posunout zlom.
       <br><br>
       MVP pravidla: 1 drát na 1 vstup. Žádné čistě algebraické cykly.
@@ -322,6 +412,9 @@
   <div id="paperMount"></div>
 </div>
 </div>
+
+
+<button id="openPyConsoleBtn" type="button" onclick="togglePyWindow()">🐍 Python</button>
 
 <!-- Floating Output Panel (toggle with button/F2) -->
 <div id="outputWindow" class="floating-panel" aria-hidden="true">
@@ -352,7 +445,54 @@
     <div id="plotCanvas"></div>
     <div id="plotMeta" class="hint" style="margin-top:8px;"></div>
   </div>
+
+<!-- Floating Python Result Window -->
 </div>
+
+
+<!-- Param editor modal (opened by double-click on a block) -->
+<div id="paramModalBackdrop" class="modal-backdrop" aria-hidden="true">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="paramModalTitle">
+    <div class="modal-header">
+      <div class="title" id="paramModalTitle">Parametry</div>
+      <div class="fp-actions">
+        <button class="fp-btn" id="paramModalCloseBtn" type="button">Close</button>
+      </div>
+    </div>
+    <div class="modal-body">
+      <div id="paramModalMeta" class="hint" style="margin-bottom:10px;"></div>
+      <div id="paramModalForm"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="fp-btn" id="paramModalCancelBtn" type="button">Cancel</button>
+      <button class="fp-btn" id="paramModalOkBtn" type="button">OK</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- Floating Python Console -->
+<div id="pyWindow" class="floating-panel" aria-hidden="true">
+  <div class="fp-header" id="pyHeader">
+    <span>Python console</span>
+    <div class="fp-actions">
+      <button class="fp-btn" type="button" onclick="runPython()">Run (Ctrl+Enter)</button>
+      <button class="fp-btn" type="button" onclick="togglePyWindow(false)">Close</button>
+    </div>
+  </div>
+  <div class="fp-body">
+    <div class="hint" style="margin-bottom:8px;">
+      Piš Python kód, spusť, a výstup se zobrazí níže. Importy: <b>math</b>, <b>numpy</b> (np).
+    </div>
+    <textarea id="pyCode" rows="14" spellcheck="false">print("Hello from Python!")
+2+2</textarea>
+
+    <div class="section-title">Result</div>
+    <pre id="pyWinOut" style="margin-top:8px;">—</pre>
+  </div>
+</div>
+
+
 
 <script>
 window.addEventListener('DOMContentLoaded', () => {
@@ -382,6 +522,63 @@ window.addEventListener('DOMContentLoaded', () => {
   window.toggleOutput = toggleOutput;
   window.togglePlotWindow = togglePlotWindow;
 
+function togglePyWindow(force) {
+  const w = document.getElementById('pyWindow');
+  if (!w) return;
+  const show = (typeof force === 'boolean') ? force : !w.classList.contains('show');
+  w.classList.toggle('show', show);
+  w.setAttribute('aria-hidden', show ? 'false' : 'true');
+}
+
+window.togglePyWindow = togglePyWindow;
+
+async function runPython() {
+  const codeEl = document.getElementById('pyCode');
+  const outEl = null; // (left-panel console removed)
+  const winEl = document.getElementById('pyWinOut');
+  const code = codeEl ? String(codeEl.value || '') : '';
+  if (winEl) winEl.textContent = 'Running...';
+  try { togglePyWindow(true); } catch(e) {}
+
+  const res = await fetch('/pyexec', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code })
+  });
+
+  const raw = await res.text();
+  let data = null;
+  try { data = JSON.parse(raw); } catch(e) {}
+
+  const lines = [];
+  if (!res.ok) {
+    lines.push(`HTTP ${res.status} ${res.statusText}`);
+    lines.push(raw || '(empty)');
+  } else if (data) {
+    if (data.stdout) {
+      lines.push('--- stdout ---');
+      lines.push(String(data.stdout).trimEnd());
+    }
+    if (data.ok) {
+      lines.push('--- result ---');
+      lines.push(data.result === null || data.result === undefined ? 'None' : String(data.result));
+    } else {
+      lines.push('--- error ---');
+      lines.push(String(data.error || 'Unknown error'));
+      if (data.traceback) {
+        lines.push('');
+        lines.push(String(data.traceback).trimEnd());
+      }
+    }
+  } else {
+    lines.push(raw || '(empty)');
+  }
+
+  const txt = lines.filter(x => x !== '').join('\n') || '—';
+  if (winEl) winEl.textContent = txt;
+}
+
+window.runPython = runPython;
   function makeDraggable(winEl, headerEl) {
     let dragging = false, startX = 0, startY = 0, origX = 0, origY = 0;
 
@@ -420,6 +617,22 @@ window.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+// Ctrl+Enter runs Python snippet (when Python editor is focused or Python tab is visible)
+document.addEventListener('keydown', (e) => {
+  const key = e.key || '';
+  if ((e.ctrlKey || e.metaKey) && key === 'Enter') {
+    const codeEl = document.getElementById('pyCode');
+    if (!codeEl) return;
+    const ae = document.activeElement;
+    const inPy = (ae === codeEl) || pyVisible;
+    if (inPy) {
+      e.preventDefault();
+      runPython();
+    }
+  }
+}, true);
+
+
   setTimeout(() => {
     const ow = document.getElementById('outputWindow');
     const oh = document.getElementById('outputHeader');
@@ -427,8 +640,12 @@ window.addEventListener('DOMContentLoaded', () => {
     const ph = document.getElementById('plotHeader');
     if (ow && oh) makeDraggable(ow, oh);
     if (pw && ph) makeDraggable(pw, ph);
+    const pyw = document.getElementById('pyWindow');
+    const pyh = document.getElementById('pyHeader');
+    if (pyw && pyh) makeDraggable(pyw, pyh);
     toggleOutput(false);
     togglePlotWindow(false);
+    togglePyWindow(false);
   }, 0);
 
   // Store last simulation response for Plot double-click
@@ -478,7 +695,48 @@ window.addEventListener('DOMContentLoaded', () => {
   Display:    { inputs: ['u'], outputs: [], defaultParams: { label: '', fmt: '%.4g', value: '' }, desc: 'show value' },
 
   TransferFunction: { inputs: ['u'], outputs: ['y'], defaultParams: { num: '1', den: '1,1' }, desc: 'continuous LTI system' },
+
+  PythonSFunction: {
+    inputs: ['u'],
+    outputs: ['y'],
+    defaultParams: {
+      n_states: 1,
+      x0: '0',
+      a: 1.0,
+      b: 1.0,
+      code: "# Define two functions: outputs(t, x, u, p) and derivatives(t, x, u, p)\n"
+        + "# Example: first-order system x' = -a*x + b*u; y = x\n"
+        + "import numpy as np\n"
+        + "def outputs(t, x, u, p):\n"
+        + "    return float(x[0])\n"
+        + "def derivatives(t, x, u, p):\n"
+        + "    a = float(p.get('a', 1.0))\n"
+        + "    b = float(p.get('b', 1.0))\n"
+        + "    return np.array([-a*x[0] + b*u], dtype=float)\n"
+    },
+    desc: 'user Python dynamic block (S-Function-like)'
+  },
 };
+
+
+
+  // ===== Simulation params helpers (stored with schemes) =====
+  function __getSimParams() {
+    const t0 = parseFloat((document.getElementById('t0') || {}).value ?? 0);
+    const t1 = parseFloat((document.getElementById('t1') || {}).value ?? 5);
+    const dt = parseFloat((document.getElementById('dt') || {}).value ?? 0.1);
+    const solver = (document.getElementById('solver') && document.getElementById('solver').value) ? document.getElementById('solver').value : 'rk45';
+    return { t0, t1, dt, solver };
+  }
+  function __setSimParams(p) {
+    if (!p) return;
+    try {
+      if (p.t0 !== undefined && document.getElementById('t0')) document.getElementById('t0').value = p.t0;
+      if (p.t1 !== undefined && document.getElementById('t1')) document.getElementById('t1').value = p.t1;
+      if (p.dt !== undefined && document.getElementById('dt')) document.getElementById('dt').value = p.dt;
+      if (p.solver !== undefined && document.getElementById('solver')) document.getElementById('solver').value = p.solver;
+    } catch(e) {}
+  }
 
 
   // ---- Short display names (canvas titles) ----
@@ -491,6 +749,7 @@ window.addEventListener('DOMContentLoaded', () => {
   Saturation: 'Sat',
   Plot: 'Plot',
   Display: 'Disp'
+  ,PythonSFunction: 'PyF'
 };
   function shortTypeName(type) { return SHORT_NAMES[type] || type; }
 
@@ -1427,12 +1686,26 @@ function updateDisplaysFromLastSim() {
       const lab = document.createElement('label');
       lab.textContent = k;
 
-      const inp = document.createElement('input');
       const defv = defaults[k];
       const isNum = (typeof defv === 'number');
-      inp.type = isNum ? 'number' : 'text';
-      if (isNum) inp.step = 'any';
-      inp.value = (params[k] !== undefined) ? params[k] : defv;
+
+      // Special editor for Python code
+      let inp;
+      if (k === 'code') {
+        inp = document.createElement('textarea');
+        inp.rows = 12;
+        inp.spellcheck = false;
+        inp.style.width = '100%';
+        inp.style.fontFamily = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
+        inp.style.fontSize = '12px';
+        inp.style.lineHeight = '1.25';
+        inp.value = (params[k] !== undefined) ? params[k] : String(defv || '');
+      } else {
+        inp = document.createElement('input');
+        inp.type = isNum ? 'number' : 'text';
+        if (isNum) inp.step = 'any';
+        inp.value = (params[k] !== undefined) ? params[k] : defv;
+      }
 
       const nodeId = String(selectedNodeId);
 
@@ -1441,7 +1714,7 @@ function updateDisplaysFromLastSim() {
         if (!n) return;
 
         let newVal;
-        if (isNum) {
+        if (k !== 'code' && isNum) {
           const v = parseFloat(inp.value);
           newVal = Number.isFinite(v) ? v : defv;
         } else {
@@ -1472,6 +1745,166 @@ refreshBlockText(nodeId);
       pe.appendChild(row);
     });
   }
+
+  // ===== Param modal (double-click block) =====
+  const __pm = {
+    open: false,
+    nodeId: null,
+    draft: null
+  };
+
+  function __pmEls() {
+    return {
+      back: document.getElementById('paramModalBackdrop'),
+      title: document.getElementById('paramModalTitle'),
+      meta: document.getElementById('paramModalMeta'),
+      form: document.getElementById('paramModalForm'),
+      ok: document.getElementById('paramModalOkBtn'),
+      cancel: document.getElementById('paramModalCancelBtn'),
+      close: document.getElementById('paramModalCloseBtn')
+    };
+  }
+
+  function __pmShow(show) {
+    const { back } = __pmEls();
+    if (!back) return;
+    back.classList.toggle('show', !!show);
+    back.setAttribute('aria-hidden', show ? 'false' : 'true');
+    __pm.open = !!show;
+    if (!show) {
+      __pm.nodeId = null;
+      __pm.draft = null;
+    }
+  }
+
+  function __pmBuildFormForNode(nodeId) {
+    const node = graph.getCell(String(nodeId));
+    if (!node || node.isLink && node.isLink()) return;
+
+    const type = node.get('blockType');
+    const spec = BLOCK_LIBRARY[type] || {};
+    const defaults = spec.defaultParams || {};
+    const keys = Object.keys(defaults);
+
+    const { title, meta, form } = __pmEls();
+    if (title) title.textContent = `Parametry: ${shortTypeName(type)} (${nodeId})`;
+    if (meta) meta.innerHTML = `<b>Type:</b> ${escapeHtml(type)} &nbsp; <b>ID:</b> ${escapeHtml(nodeId)}`;
+
+    form.innerHTML = '';
+    if (!keys.length) {
+      form.innerHTML = `<div class="hint">No params for this block.</div>`;
+      __pm.draft = {};
+      return;
+    }
+
+    // Prepare draft copy
+    __pm.draft = { ...(node.get('params') || {}) };
+
+    keys.forEach((k) => {
+      const row = document.createElement('div');
+      row.className = 'kv';
+      row.style.marginBottom = '10px';
+
+      const lab = document.createElement('label');
+      lab.textContent = k;
+
+      const defv = defaults[k];
+      const isNum = (typeof defv === 'number');
+
+      let inp;
+      if (k === 'code') {
+        inp = document.createElement('textarea');
+        inp.rows = 14;
+        inp.spellcheck = false;
+        inp.style.fontFamily = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
+        inp.style.fontSize = '12px';
+        inp.style.lineHeight = '1.25';
+        inp.value = (__pm.draft[k] !== undefined) ? __pm.draft[k] : String(defv || '');
+      } else {
+        inp = document.createElement('input');
+        inp.type = isNum ? 'number' : 'text';
+        if (isNum) inp.step = 'any';
+        inp.value = (__pm.draft[k] !== undefined) ? __pm.draft[k] : defv;
+      }
+
+      inp.addEventListener('input', () => {
+        let v;
+        if (k !== 'code' && isNum) {
+          const x = parseFloat(inp.value);
+          v = Number.isFinite(x) ? x : defv;
+        } else {
+          v = inp.value;
+        }
+        __pm.draft[k] = v;
+      });
+
+      row.appendChild(lab);
+      row.appendChild(inp);
+      form.appendChild(row);
+    });
+  }
+
+  function openParamModalForNode(nodeId) {
+    const node = graph.getCell(String(nodeId));
+    if (!node) return;
+    const type = node.get('blockType');
+    if (type === 'Plot') return; // Plot has its own double-click behavior
+    __pm.nodeId = String(nodeId);
+    __pmBuildFormForNode(__pm.nodeId);
+    __pmShow(true);
+    // Focus first input if possible
+    setTimeout(() => {
+      try {
+        const { form } = __pmEls();
+        const first = form ? form.querySelector('input,textarea,select') : null;
+        if (first) first.focus();
+      } catch(e) {}
+    }, 0);
+  }
+
+  function __pmApply() {
+    if (!__pm.nodeId) { __pmShow(false); return; }
+    const n = graph.getCell(String(__pm.nodeId));
+    if (!n) { __pmShow(false); return; }
+
+    const type = n.get('blockType');
+    let p = { ...(n.get('params') || {}), ...(__pm.draft || {}) };
+    if (type === 'Sum') p = __normalizeSumParams(p);
+    if (type === 'Plot') p = __normalizePlotParams(p);
+
+    n.set('params', p);
+
+    // If ports depend on params, rebuild ports
+    try {
+      if (type === 'Sum' || type === 'Plot') __rebuildPortsForCell(n);
+    } catch(e) {}
+
+    refreshBlockText(String(n.id));
+    try { refreshAllPlotNodeLabels(); } catch(e) {}
+    try { refreshAllDisplayNodeLabels(); } catch(e) {}
+    __pmShow(false);
+  }
+
+  // Modal bindings
+  setTimeout(() => {
+    const { back, ok, cancel, close } = __pmEls();
+    if (ok) ok.addEventListener('click', __pmApply);
+    const dismiss = () => __pmShow(false);
+    if (cancel) cancel.addEventListener('click', dismiss);
+    if (close) close.addEventListener('click', dismiss);
+    if (back) {
+      back.addEventListener('mousedown', (e) => {
+        if (e.target === back) dismiss();
+      });
+    }
+    document.addEventListener('keydown', (e) => {
+      if (!__pm.open) return;
+      if (e.key === 'Escape') { e.preventDefault(); dismiss(); }
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); __pmApply(); }
+    }, true);
+  }, 0);
+
+
   // ===== RMB drag copy (duplicate block) =====
   let __copyDrag = null;
   let __copyDragDown = false; // guard against duplicate RMB copy triggers
@@ -1963,6 +2396,7 @@ refreshBlockText(nodeId);
     const scheme = {
       version: 1,
       nextId,
+      sim: __getSimParams(),
       elements: graph.getElements().map(el => ({
         id: String(el.id),
         type: el.get('blockType'),
@@ -2003,6 +2437,7 @@ refreshBlockText(nodeId);
 
         nextId = Math.max(1, parseInt(scheme.nextId || '1', 10));
 
+        try { __setSimParams(scheme.sim || scheme.simParams || scheme); } catch(e) {}
         // elements
         const idSet = new Set();
         (scheme.elements || []).forEach(e => {
@@ -2295,23 +2730,27 @@ function openPlotForPlotNode(plotNodeId) {
 
 paper.on('element:pointerdblclick', (elementView) => {
     const el = elementView.model;
-    if (el && el.get('blockType') === 'Plot') openPlotForPlotNode(String(el.id));
+    if (!el) return;
+    const t = el.get('blockType');
+    if (t === 'Plot') openPlotForPlotNode(String(el.id));
+    else openParamModalForNode(String(el.id));
   });
 
-
-  // ===== Multiple open schemes (tabs) =====
+// ===== Multiple open schemes (tabs) =====
   const __schemes = []; // { name, state }
   let __activeScheme = -1;
 
   function __captureSchemeState() {
-    return { graph: graph.toJSON(), nextId };
+    return { graph: graph.toJSON(), nextId, sim: __getSimParams() };
   }
 
   function __restoreSchemeState(state) {
     if (!state) return;
     graph.fromJSON(state.graph || {});
     nextId = Math.max(1, parseInt(state.nextId || '1', 10));
-    // Clear selection
+    
+    try { __setSimParams(state.sim || null); } catch(e) {}
+// Clear selection
     try {
       selectedNodeId = null;
       selectedNodeIds = new Set();
@@ -2372,7 +2811,7 @@ paper.on('element:pointerdblclick', (elementView) => {
       __schemes[__activeScheme].state = __captureSchemeState();
     }
     const name = 'Scheme ' + (__schemes.length + 1);
-    const state = { graph: { cells: [] }, nextId: 1 };
+    const state = { graph: { cells: [] }, nextId: 1, sim: __getSimParams() };
     __schemes.push({ name, state });
     __activeScheme = __schemes.length - 1;
     graph.clear();
@@ -2406,6 +2845,9 @@ paper.on('element:pointerdblclick', (elementView) => {
     if (!res.ok) throw new Error(`Failed to load default_scheme.json (${res.status})`);
 
     const scheme = await res.json();
+
+    // Apply simulation parameters from loaded JSON (top-level or nested)
+    try { __setSimParams(scheme.sim || scheme.simParams || scheme); } catch(e) {}
 
     // 1) Vytvoř bloky a udělej mapování původníID -> nováID
     const idMap = new Map();
