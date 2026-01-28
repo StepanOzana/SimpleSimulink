@@ -1,16 +1,17 @@
 <!doctype html>
 <html lang="en">
 <head>
+  <link rel="icon" href="/favicon.ico">
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Simulink-lite (Plain HTML) - JointJS</title>
 
   <!-- JointJS (UMD, no build step) -->
-  <link rel="stylesheet" href="/static/joint.min.css">
-  <script src="/static/joint.min.js"></script>
+  <link rel="stylesheet" href="/static/joint.css">
+  <script src="/static/joint.js"></script>
 
   <!-- Plotly (kept as in your Drawflow version) -->
-  <script src="/static/plotly-3.3.0.min.js"></script>
+  <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
 
   <style>
     body { margin: 0; font-family: Arial, sans-serif; }
@@ -137,13 +138,90 @@
   z-index: 10000;
 }
 
-</style>
+
+    /* === UI Tabs (left panel) === */
+    .ltabs{ display:flex; gap:6px; margin:8px 0 10px; }
+    .ltab{ flex:1; border:1px solid #d1d5db; background:#fff; border-radius:10px; padding:8px 10px; cursor:pointer; font-weight:700; }
+    .ltab.active{ background:#f3f4f6; }
+    .lsection{ display:none; }
+    .lsection.show{ display:block; }
+
+    /* === Scheme tabs (top of canvas) === */
+    #paperWrap{ position:relative; }
+    #schemeTabs{
+      position:absolute;
+      left:0; right:0; top:0;
+      height:36px;
+      display:flex;
+      align-items:center;
+      gap:6px;
+      padding:6px 8px;
+      background: rgba(255,255,255,0.92);
+      border-bottom:1px solid #e5e7eb;
+      z-index: 12000;
+      box-sizing:border-box;
+      backdrop-filter: blur(6px);
+    }
+    .stab{
+      border:1px solid #d1d5db;
+      background:#fff;
+      border-radius:999px;
+      padding:6px 10px;
+      cursor:pointer;
+      font-weight:700;
+      font-size:12px;
+      display:flex;
+      align-items:center;
+      gap:8px;
+      max-width:180px;
+    }
+    .stab.active{ background:#eef2ff; border-color:#c7d2fe; }
+    .stab .x{ font-weight:900; opacity:0.65; }
+    .stab:hover .x{ opacity:0.95; }
+    .stabAdd{ margin-left:auto; border-style:dashed; }
+    #paperMount{ position:absolute; left:0; right:0; top:36px; bottom:0; }
+
+
+    .copy-ghost{
+      position:absolute;
+      z-index:50;
+      pointer-events:none;
+      border:2px dashed #444;
+      border-radius:12px;
+      background:rgba(255,255,255,0.55);
+      box-shadow:0 2px 10px rgba(0,0,0,0.18);
+      user-select:none;
+
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      font-size:12px;
+      font-weight:700;
+
+      transform: translate(-50%, -50%);
+    }
+    .copy-ghost .label{
+      padding:4px 8px;
+      background:rgba(255,255,255,0.75);
+      border-radius:999px;
+      border:1px solid rgba(0,0,0,0.15);
+    }
+
+
+  </style>
 </head>
 <body>
 <div class="layout">
   <!-- Left panel -->
   <div class="panel">
-    <h3>Blocks</h3>
+    <h3>Project</h3>
+<div class="ltabs">
+  <button class="ltab active" data-tab="blocks" type="button">Blocks</button>
+  <button class="ltab" data-tab="run" type="button">Run</button>
+  <button class="ltab" data-tab="settings" type="button">Nastavení</button>
+</div>
+<div id="tab_blocks" class="lsection show">
+<h3>Blocks</h3>
     <div class="blockcats">
       <details class="cat">
         <summary>Sources</summary>
@@ -180,12 +258,14 @@
         <summary>Sinks</summary>
         <div class="toolbar">
           <button class="blockbtn" onclick="addBlock('Plot')">+ Plot</button>
+          <button class="blockbtn" onclick="addBlock('Display')">+ Display</button>
         </div>
       </details>
     </div>
 
-    <hr>
+    </div>
 
+    <div id="tab_run" class="lsection">
     <h3>Schéma</h3>
     <button onclick="saveScheme()">💾 Uložit schéma</button>
     <input type="file" id="loadSchemeInput" accept="application/json" style="display:none" onchange="loadSchemeFromFile(event)">
@@ -208,6 +288,27 @@
     <button onclick="simulate()">Simulate</button>
     <button id="toggleOutputBtn" style="margin-top:10px;" onclick="toggleOutput()">Show Output (F2)</button>
 
+
+    <div id="tab_settings" class="lsection">
+      <h3>Nastavení simulace</h3>
+      <div class="kv">
+        <label>Solver</label>
+        <select id="solver" style="width:100%; padding:6px;">
+          <option value="rk45">RK45 (solve_ivp)</option>
+          <option value="rk4">RK4 (fixed-step)</option>
+          <option value="rk2">RK2 / Heun (fixed-step)</option>
+          <option value="euler">Euler (fixed-step)</option>
+          <option value="radau">Radau (solve_ivp)</option>
+          <option value="bdf">BDF (solve_ivp)</option>
+        </select>
+      </div>
+      <div class="hint" style="margin-top:8px;">
+        Pozn.: Fixed-step metody používají přesně <b>dt</b>. solve_ivp metody jsou adaptivní, ale výsledky jsou vzorkované na t_eval.
+      </div>
+    </div>
+
+    </div>
+
     <p class="hint">
       Tip: Klikni na blok pro editaci parametrů vlevo. Propoj porty tažením z výstupu do vstupu. Dvojklik na drát přidá zlom (vertex), který lze táhnout. Navíc: můžeš chytnout drát kdekoliv a tahem vytvořit/posunout zlom.
       <br><br>
@@ -216,7 +317,10 @@
   </div>
 
   <!-- Canvas -->
-  <div id="paperWrap" tabindex="0"></div>
+  <div id="paperWrap" tabindex="0">
+  <div id="schemeTabs"></div>
+  <div id="paperMount"></div>
+</div>
 </div>
 
 <!-- Floating Output Panel (toggle with button/F2) -->
@@ -343,27 +447,51 @@ window.addEventListener('DOMContentLoaded', () => {
 
   setStatus('JS started. Initializing JointJS editor...');
 
+
+  // ===== Left panel tabs (Blocks / Run / Settings) =====
+  function __setLeftTab(name){
+    document.querySelectorAll('.ltab').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+    document.querySelectorAll('.lsection').forEach(s => s.classList.remove('show'));
+    const el = document.getElementById('tab_' + name);
+    if (el) el.classList.add('show');
+  }
+  document.querySelectorAll('.ltab').forEach(b => {
+    b.addEventListener('click', () => __setLeftTab(b.dataset.tab || 'blocks'));
+  });
+
+
   // ---- Block library: ports + default params ----
   const BLOCK_LIBRARY = {
-    Constant:   { inputs: [], outputs: ['y'], defaultParams: { value: 1.0 }, desc: 'constant source' },
-    Gain:       { inputs: ['u'], outputs: ['y'], defaultParams: { k: 1.0 }, desc: 'multiply input' },
-    Sum:        { inputs: ['u1','u2'], outputs: ['y'], defaultParams: { signs: '++' }, desc: 'sum inputs' },
-    Integrator: { inputs: ['u'], outputs: ['y'], defaultParams: { x0: 0.0 }, desc: '∫ u dt' },
-    Saturation: { inputs: ['u'], outputs: ['y'], defaultParams: { lower: -1.0, upper: 1.0 }, desc: 'limit signal to [lower, upper]' },
-    Plot:       { inputs: ['u'], outputs: [], defaultParams: { label: '' }, desc: 'signal scope' },
-    TransferFunction: { inputs: ['u'], outputs: ['y'], defaultParams: { num: '1', den: '1,1' }, desc: 'continuous LTI system' },
-  };
+  Constant:   { inputs: [], outputs: ['y'], defaultParams: { value: 1.0 }, desc: 'constant source' },
+  Gain:       { inputs: ['u'], outputs: ['y'], defaultParams: { k: 1.0 }, desc: 'multiply input' },
+
+  // Multi-input sum: inputs u1..uN where N=params.n; signs string (e.g. '++-+')
+  Sum:        { inputs: ['u1','u2'], outputs: ['y'], defaultParams: { n: 2, signs: '++' }, desc: 'sum inputs' },
+
+  Integrator: { inputs: ['u'], outputs: ['y'], defaultParams: { x0: 0.0 }, desc: '∫ u dt' },
+  Saturation: { inputs: ['u'], outputs: ['y'], defaultParams: { lower: -1.0, upper: 1.0 }, desc: 'limit signal to [lower, upper]' },
+
+  // Multi-input scope: inputs u1..uN where N=params.n
+  Plot:       { inputs: ['u'], outputs: [], defaultParams: { n: 1, label: '' }, desc: 'signal scope' },
+
+  // Display sink: shows last simulated value of its input
+  Display:    { inputs: ['u'], outputs: [], defaultParams: { label: '', fmt: '%.4g', value: '' }, desc: 'show value' },
+
+  TransferFunction: { inputs: ['u'], outputs: ['y'], defaultParams: { num: '1', den: '1,1' }, desc: 'continuous LTI system' },
+};
+
 
   // ---- Short display names (canvas titles) ----
   const SHORT_NAMES = {
-    Constant: 'Const',
-    TransferFunction: 'TF',
-    Integrator: 'Int',
-    Gain: 'Gain',
-    Sum: 'Sum',
-    Saturation: 'Sat',
-    Plot: 'Plot'
-  };
+  Constant: 'Const',
+  TransferFunction: 'TF',
+  Integrator: 'Int',
+  Gain: 'Gain',
+  Sum: 'Sum',
+  Saturation: 'Sat',
+  Plot: 'Plot',
+  Display: 'Disp'
+};
   function shortTypeName(type) { return SHORT_NAMES[type] || type; }
 
   // ===== JointJS graph + paper =====
@@ -474,7 +602,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
   
 
-    // ===== Delete key: remove selected link or selected block(s) (and connected links) =====
+    // ===== Delete key: remove selected link(s) and/or selected block(s) (and connected links) =====
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Delete' && e.key !== 'Backspace') return;
 
@@ -482,41 +610,48 @@ window.addEventListener('DOMContentLoaded', () => {
     const ae = document.activeElement;
     if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
 
-    // Prefer deleting selected link if any
-    if (typeof selectedLinkId !== 'undefined' && selectedLinkId) {
-      const l = graph.getCell(selectedLinkId);
-      if (l) l.remove();
-      if (typeof setSelectedLink === 'function') setSelectedLink(null);
-      e.preventDefault();
-      return;
-    }
+    const linkIds = (typeof selectedLinkIds !== 'undefined' && selectedLinkIds && selectedLinkIds.size)
+      ? Array.from(selectedLinkIds).map(String)
+      : (typeof selectedLinkId !== 'undefined' && selectedLinkId ? [String(selectedLinkId)] : []);
 
-    // Delete selected nodes (multi-select supported)
-    const ids = (typeof selectedNodeIds !== 'undefined' && selectedNodeIds && selectedNodeIds.size)
+    const blockIds = (typeof selectedNodeIds !== 'undefined' && selectedNodeIds && selectedNodeIds.size)
       ? Array.from(selectedNodeIds).map(String)
       : (typeof selectedNodeId !== 'undefined' && selectedNodeId ? [String(selectedNodeId)] : []);
 
-    if (!ids.length) return;
+    if (!linkIds.length && !blockIds.length) return;
 
-    // Remove connected links first, then nodes
-    ids.forEach(id => {
+    // Remove selected links first
+    linkIds.forEach(id => {
+      const l = graph.getCell(String(id));
+      if (l && l.isLink()) l.remove();
+    });
+
+    // Remove selected blocks (and any links connected to them)
+    blockIds.forEach(id => {
       const el = graph.getCell(String(id));
-      if (!el) return;
+      if (!el || (el.isLink && el.isLink())) return;
       const links = graph.getConnectedLinks(el);
       links.forEach(link => link.remove());
       el.remove();
     });
 
-    // Clear selection
-    if (typeof selectedNodeId !== 'undefined') selectedNodeId = null;
-    if (typeof selectedNodeIds !== 'undefined') selectedNodeIds = new Set();
-    try { clearBlockSelection(); } catch(e) {}
-    try { renderParamEditor(); } catch(e) {}
+    // Clear selection state
+    try {
+      selectedNodeId = null;
+      selectedNodeIds = new Set();
+      clearBlockSelection();
+      renderParamEditor();
+    } catch(e) {}
+
+    try { clearSelectedLinks(); } catch(e) {}
     try { refreshAllPlotNodeLabels(); } catch(e) {}
+    try { clearHover(); } catch(e) {}
 
     e.preventDefault();
+    e.stopPropagation();
   }, true);
 const wrap = document.getElementById('paperWrap');
+  const paperMount = document.getElementById('paperMount');
   
   // ===== Connection validation (Simulink-style) =====
   function __getPortGroup(m) {
@@ -529,7 +664,7 @@ const wrap = document.getElementById('paperWrap');
 const paper = new joint.dia.Paper({
     // Only allow starting a wire from OUT ports (ports have port-group="out")
     validateMagnet: function(cellView, magnet) {
-      return __getPortGroup(magnet) === 'out';
+      return __getPortGroup(magnet) === 'out' || __getPortGroup(magnet) === 'in';
     },
 
     // Enforce OUT → IN and forbid connecting to blocks without any IN ports.
@@ -551,7 +686,7 @@ const paper = new joint.dia.Paper({
       return true;
     },
 
-    el: wrap,
+    el: paperMount,
     model: graph,
     gridSize: 20,
     drawGrid: true,
@@ -568,185 +703,213 @@ const paper = new joint.dia.Paper({
         }
       });
 
-  l.router('manhattan', { step: 20, padding: 12 });
+  // ===== Diagram zoom (paper scale) with CTRL + mouse wheel =====
+  // Zooms the JointJS paper only (not the whole page). Keeps the point under cursor stable.
+  let __paperScale = { x: 1, y: 1 };
+  const __ZOOM_MIN = 0.35;
+  const __ZOOM_MAX = 2.5;
+  const __ZOOM_STEP = 1.12; // per wheel notch
+
+  function __clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
+
+  function __setPaperScaleAroundClientPoint(newS, clientPt) {
+    // Keep cursor position stable: adjust translate based on local point before/after scaling.
+    const before = paper.clientToLocalPoint(clientPt);
+
+    paper.scale(newS, newS);
+    __paperScale = { x: newS, y: newS };
+
+    const after = paper.clientToLocalPoint(clientPt);
+
+    const dx = (after.x - before.x) * newS;
+    const dy = (after.y - before.y) * newS;
+
+    const t = paper.translate();
+    paper.translate((t.tx || 0) + dx, (t.ty || 0) + dy);
+  }
+
+  wrap.addEventListener('wheel', (e) => {
+    if (!e.ctrlKey) return;              // only CTRL + wheel
+    e.preventDefault();                  // prevent browser zoom
+    e.stopPropagation();
+
+    const dir = (e.deltaY < 0) ? 1 : -1; // wheel up => zoom in
+    const factor = (dir > 0) ? __ZOOM_STEP : (1 / __ZOOM_STEP);
+    const next = __clamp(__paperScale.x * factor, __ZOOM_MIN, __ZOOM_MAX);
+
+    __setPaperScaleAroundClientPoint(next, { x: e.clientX, y: e.clientY });
+  }, { passive: false });
+
+
+      
+
+  // ===== UX: Pan the whole diagram with RIGHT mouse button (DOM-based, reliable) =====
+  // Right-drag on empty canvas pans the paper. Left button stays for selection/move.
+  let __panning = false;
+  let __panStartClient = { x: 0, y: 0 };
+  let __panStartTranslate = { x: 0, y: 0 };
+
+  // Disable browser context menu on canvas so RMB drag works everywhere
+  wrap.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  function __isInteractiveTarget(t) {
+    // If user right-clicks a block/link/port, don't pan (avoid conflicts)
+    return !!(t && (t.closest('.joint-element') || t.closest('.joint-link') || t.closest('.joint-port')));
+  }
+
+  wrap.addEventListener('mousedown', (e) => {
+    if (e.button !== 2) return;                // 2 = right mouse button
+    if (__isInteractiveTarget(e.target)) return;
+
+    __panning = true;
+    __panStartClient = { x: e.clientX, y: e.clientY };
+    const tr = paper.translate();
+    __panStartTranslate = { x: tr.tx || 0, y: tr.ty || 0 };
+
+    e.preventDefault();
+    e.stopPropagation();
+  }, true);
+
+  window.addEventListener('mousemove', (e) => {
+    if (!__panning) return;
+    const dx = e.clientX - __panStartClient.x;
+    const dy = e.clientY - __panStartClient.y;
+    paper.translate(__panStartTranslate.x + dx, __panStartTranslate.y + dy);
+    e.preventDefault();
+  }, true);
+
+  window.addEventListener('mouseup', (e) => {
+    if (e.button !== 2) return;
+    __panning = false;
+  }, true);
+
+  
+  // ===== LMB drag: box selection of multiple blocks (marquee) =====
+  // Drag on empty canvas (left button) draws a rectangle and selects intersecting blocks.
+  let __boxSel = null; // { startClient:{x,y}, rectEl }
+  function __clientRectToLocalRect(c0, c1) {
+    const p0 = paper.clientToLocalPoint(c0);
+    const p1 = paper.clientToLocalPoint(c1);
+    const x1 = Math.min(p0.x, p1.x), y1 = Math.min(p0.y, p1.y);
+    const x2 = Math.max(p0.x, p1.x), y2 = Math.max(p0.y, p1.y);
+    return { x: x1, y: y1, width: (x2 - x1), height: (y2 - y1) };
+  }
+  function __rectsIntersect(a, b) {
+    return !(a.x + a.width < b.x || b.x + b.width < a.x || a.y + a.height < b.y || b.y + b.height < a.y);
+  }
+  function __rectContains(outer, inner) {
+    return (inner.x >= outer.x && inner.y >= outer.y &&
+            (inner.x + inner.width) <= (outer.x + outer.width) &&
+            (inner.y + inner.height) <= (outer.y + outer.height));
+  }
+  function __isBlankTarget(t) {
+    // Only start box selection when clicking on empty background, not on elements/links/ports.
+    return !(t && (t.closest('.joint-element') || t.closest('.joint-link') || t.closest('.joint-port')));
+  }
+
+  wrap.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return; // left only
+    if (!__isBlankTarget(e.target)) return;
+
+    __boxSel = { startClient: { x: e.clientX, y: e.clientY }, rectEl: null };
+
+    const r = document.createElement('div');
+    r.className = 'box-select-rect';
+    r.style.left = '0px';
+    r.style.top = '0px';
+    r.style.width = '0px';
+    r.style.height = '0px';
+    wrap.appendChild(r);
+    __boxSel.rectEl = r;
+
+    // Clear selection at start of box select unless Ctrl is held (Ctrl = additive selection)
+    if (!e.ctrlKey) {
+      selectedNodeId = null;
+      selectedNodeIds = new Set();
+      clearBlockSelection();
+      try { clearSelectedLinks(); } catch(e) {}
+      renderParamEditor();
+    }
+
+    e.preventDefault();
+  }, true);
+
+  window.addEventListener('mousemove', (e) => {
+    if (!__boxSel) return;
+    const x0 = __boxSel.startClient.x, y0 = __boxSel.startClient.y;
+    const x1 = e.clientX, y1 = e.clientY;
+
+    const left = Math.min(x0, x1), top = Math.min(y0, y1);
+    const w = Math.abs(x1 - x0), h = Math.abs(y1 - y0);
+
+    if (__boxSel.rectEl) {
+      const wrapRect = wrap.getBoundingClientRect();
+      __boxSel.rectEl.style.left = (left - wrapRect.left) + 'px';
+      __boxSel.rectEl.style.top = (top - wrapRect.top) + 'px';
+      __boxSel.rectEl.style.width = w + 'px';
+      __boxSel.rectEl.style.height = h + 'px';
+    }
+  }, true);
+
+  window.addEventListener('mouseup', (e) => {
+    if (!__boxSel) return;
+
+    const c0 = __boxSel.startClient;
+    const c1 = { x: e.clientX, y: e.clientY };
+    const selLocal = __clientRectToLocalRect(c0, c1);
+
+    const hitBlocks = [];
+    graph.getElements().forEach(el => {
+      const bb = el.getBBox(); // paper local coords
+      const r = { x: bb.x, y: bb.y, width: bb.width, height: bb.height };
+      if (__rectsIntersect(selLocal, r)) hitBlocks.push(String(el.id));
+    });
+
+    // Links: only those whose *entire* geometry lies inside the selection rectangle.
+    const hitLinks = [];
+    graph.getLinks().forEach(link => {
+      const bb = link.getBBox(); // bbox of the whole link path
+      const r = { x: bb.x, y: bb.y, width: bb.width, height: bb.height };
+      if (__rectContains(selLocal, r)) hitLinks.push(String(link.id));
+    });
+
+    const additive = !!(e && e.ctrlKey);
+
+    // Update block selection (additive or replace)
+    if (!additive) {
+      selectedNodeIds = new Set(hitBlocks);
+    } else {
+      if (!selectedNodeIds) selectedNodeIds = new Set();
+      hitBlocks.forEach(id => selectedNodeIds.add(String(id)));
+    }
+    const blockIds = Array.from(selectedNodeIds || []);
+    selectedNodeId = (blockIds.length === 1) ? blockIds[0] : null;
+    setSelectedBlocks(selectedNodeIds);
+
+    // Update link selection (additive or replace)
+    try { setSelectedLinks(hitLinks, { additive }); } catch(err) {}
+
+    renderParamEditor();
+
+    if (__boxSel.rectEl && __boxSel.rectEl.parentNode) __boxSel.rectEl.parentNode.removeChild(__boxSel.rectEl);
+    __boxSel = null;
+  }, true);
+
+
+l.router('manhattan', { step: 20, padding: 12 });
       l.connector('rounded', { radius: 8 });
       return l;
     },
     interactive: function(cellView) {
-      // allow moving elements and manipulating links
-      if (cellView.model.isLink()) return { vertexAdd: true, vertexMove: true, vertexRemove: true };
+      // We implement link vertex editing ourselves (Shift+drag). Disable Joint's built-in vertex handles
+      // so vertices can't be moved/added/removed without Shift.
+      if (cellView.model.isLink()) return { vertexAdd: false, vertexMove: false, vertexRemove: false, arrowheadMove: false, linkMove: false, labelMove: false };
       return true;
     },
     linkPinning: false,
     snapLinks: { radius: 30 },
     markAvailable: true
   });
-
-  // ===== Viewport interactions (zoom/pan/box-select) =====
-  // (Moved out of defaultLink() to avoid registering listeners repeatedly.)
-// ===== Diagram zoom (paper scale) with CTRL + mouse wheel =====
-    // Zooms the JointJS paper only (not the whole page). Keeps the point under cursor stable.
-    let __paperScale = { x: 1, y: 1 };
-    const __ZOOM_MIN = 0.35;
-    const __ZOOM_MAX = 2.5;
-    const __ZOOM_STEP = 1.12; // per wheel notch
-  
-    function __clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
-  
-    function __setPaperScaleAroundClientPoint(newS, clientPt) {
-      // Keep cursor position stable: adjust translate based on local point before/after scaling.
-      const before = paper.clientToLocalPoint(clientPt);
-  
-      paper.scale(newS, newS);
-      __paperScale = { x: newS, y: newS };
-  
-      const after = paper.clientToLocalPoint(clientPt);
-  
-      const dx = (after.x - before.x) * newS;
-      const dy = (after.y - before.y) * newS;
-  
-      const t = paper.translate();
-      paper.translate((t.tx || 0) + dx, (t.ty || 0) + dy);
-    }
-  
-    wrap.addEventListener('wheel', (e) => {
-      if (!e.ctrlKey) return;              // only CTRL + wheel
-      e.preventDefault();                  // prevent browser zoom
-      e.stopPropagation();
-  
-      const dir = (e.deltaY < 0) ? 1 : -1; // wheel up => zoom in
-      const factor = (dir > 0) ? __ZOOM_STEP : (1 / __ZOOM_STEP);
-      const next = __clamp(__paperScale.x * factor, __ZOOM_MIN, __ZOOM_MAX);
-  
-      __setPaperScaleAroundClientPoint(next, { x: e.clientX, y: e.clientY });
-    }, { passive: false });
-  
-  
-        
-  
-    // ===== UX: Pan the whole diagram with RIGHT mouse button (DOM-based, reliable) =====
-    // Right-drag on empty canvas pans the paper. Left button stays for selection/move.
-    let __panning = false;
-    let __panStartClient = { x: 0, y: 0 };
-    let __panStartTranslate = { x: 0, y: 0 };
-  
-    // Disable browser context menu on canvas so RMB drag works everywhere
-    wrap.addEventListener('contextmenu', (e) => e.preventDefault());
-  
-    function __isInteractiveTarget(t) {
-      // If user right-clicks a block/link/port, don't pan (avoid conflicts)
-      return !!(t && (t.closest('.joint-element') || t.closest('.joint-link') || t.closest('.joint-port')));
-    }
-  
-    wrap.addEventListener('mousedown', (e) => {
-      if (e.button !== 2) return;                // 2 = right mouse button
-      if (__isInteractiveTarget(e.target)) return;
-  
-      __panning = true;
-      __panStartClient = { x: e.clientX, y: e.clientY };
-      const tr = paper.translate();
-      __panStartTranslate = { x: tr.tx || 0, y: tr.ty || 0 };
-  
-      e.preventDefault();
-      e.stopPropagation();
-    }, true);
-  
-    window.addEventListener('mousemove', (e) => {
-      if (!__panning) return;
-      const dx = e.clientX - __panStartClient.x;
-      const dy = e.clientY - __panStartClient.y;
-      paper.translate(__panStartTranslate.x + dx, __panStartTranslate.y + dy);
-      e.preventDefault();
-    }, true);
-  
-    window.addEventListener('mouseup', (e) => {
-      if (e.button !== 2) return;
-      __panning = false;
-    }, true);
-  
-    
-    // ===== LMB drag: box selection of multiple blocks (marquee) =====
-    // Drag on empty canvas (left button) draws a rectangle and selects intersecting blocks.
-    let __boxSel = null; // { startClient:{x,y}, rectEl }
-    function __clientRectToLocalRect(c0, c1) {
-      const p0 = paper.clientToLocalPoint(c0);
-      const p1 = paper.clientToLocalPoint(c1);
-      const x1 = Math.min(p0.x, p1.x), y1 = Math.min(p0.y, p1.y);
-      const x2 = Math.max(p0.x, p1.x), y2 = Math.max(p0.y, p1.y);
-      return { x: x1, y: y1, width: (x2 - x1), height: (y2 - y1) };
-    }
-    function __rectsIntersect(a, b) {
-      return !(a.x + a.width < b.x || b.x + b.width < a.x || a.y + a.height < b.y || b.y + b.height < a.y);
-    }
-    function __isBlankTarget(t) {
-      // Only start box selection when clicking on empty background, not on elements/links/ports.
-      return !(t && (t.closest('.joint-element') || t.closest('.joint-link') || t.closest('.joint-port')));
-    }
-  
-    wrap.addEventListener('mousedown', (e) => {
-      if (e.button !== 0) return; // left only
-      if (!__isBlankTarget(e.target)) return;
-  
-      __boxSel = { startClient: { x: e.clientX, y: e.clientY }, rectEl: null };
-  
-      const r = document.createElement('div');
-      r.className = 'box-select-rect';
-      r.style.left = '0px';
-      r.style.top = '0px';
-      r.style.width = '0px';
-      r.style.height = '0px';
-      wrap.appendChild(r);
-      __boxSel.rectEl = r;
-  
-      // Clear selection at start of box select
-      selectedNodeId = null;
-      selectedNodeIds = new Set();
-      clearBlockSelection();
-      renderParamEditor();
-  
-      e.preventDefault();
-    }, true);
-  
-    window.addEventListener('mousemove', (e) => {
-      if (!__boxSel) return;
-      const x0 = __boxSel.startClient.x, y0 = __boxSel.startClient.y;
-      const x1 = e.clientX, y1 = e.clientY;
-  
-      const left = Math.min(x0, x1), top = Math.min(y0, y1);
-      const w = Math.abs(x1 - x0), h = Math.abs(y1 - y0);
-  
-      if (__boxSel.rectEl) {
-        const wrapRect = wrap.getBoundingClientRect();
-        __boxSel.rectEl.style.left = (left - wrapRect.left) + 'px';
-        __boxSel.rectEl.style.top = (top - wrapRect.top) + 'px';
-        __boxSel.rectEl.style.width = w + 'px';
-        __boxSel.rectEl.style.height = h + 'px';
-      }
-    }, true);
-  
-    window.addEventListener('mouseup', (e) => {
-      if (!__boxSel) return;
-  
-      const c0 = __boxSel.startClient;
-      const c1 = { x: e.clientX, y: e.clientY };
-      const selLocal = __clientRectToLocalRect(c0, c1);
-  
-      const hits = [];
-      graph.getElements().forEach(el => {
-        const bb = el.getBBox(); // paper local coords
-        const r = { x: bb.x, y: bb.y, width: bb.width, height: bb.height };
-        if (__rectsIntersect(selLocal, r)) hits.push(String(el.id));
-      });
-  
-      selectedNodeIds = new Set(hits);
-      selectedNodeId = (hits.length === 1) ? hits[0] : null;
-      setSelectedBlocks(selectedNodeIds);
-      renderParamEditor();
-  
-      if (__boxSel.rectEl && __boxSel.rectEl.parentNode) __boxSel.rectEl.parentNode.removeChild(__boxSel.rectEl);
-      __boxSel = null;
-    }, true);
-
   // === Port positioning: tangent to block edge (circle edge touches the block edge) ===
   // We keep the visual port radius = 7, but shift the port CENTER inward by 7px.
   const PORT_RADIUS = 7;     // must match portBody r
@@ -782,7 +945,12 @@ const paper = new joint.dia.Paper({
     // Ensure the wrapper itself is sized deterministically
     wrap.style.width = w + 'px';
     wrap.style.height = h + 'px';
-    paper.setDimensions(w, h);
+    const tabsH = 36;
+    if (paperMount) {
+      paperMount.style.top = tabsH + 'px';
+      paperMount.style.height = (h - tabsH) + 'px';
+    }
+    paper.setDimensions(w, Math.max(200, h - tabsH));
   }
   window.addEventListener('resize', fitPaper);
   setTimeout(() => fitPaper(), 0);
@@ -836,14 +1004,23 @@ const paper = new joint.dia.Paper({
     const defaults = spec.defaultParams || {};
 
     if (type === 'Plot') {
-      const sig = (meta && meta.signalPretty) ? String(meta.signalPretty) : '';
-      const lbl = (params && typeof params.label === 'string') ? params.label.trim() : '';
-      if (lbl && sig && lbl !== sig) return `${lbl} — ${sig}`;
-      if (lbl) return lbl;
-      if (sig) return sig;
-      return '(not connected)';
-    }
-    if (type === 'Constant')   return `value=${(params && params.value !== undefined) ? params.value : defaults.value}`;
+  const sigs = (meta && Array.isArray(meta.signalPrettyList)) ? meta.signalPrettyList.map(String) : [];
+  const sigLine = sigs.length ? sigs.join(' | ') : '';
+  const lbl = (params && typeof params.label === 'string') ? params.label.trim() : '';
+  if (lbl && sigLine && lbl !== sigLine) return `${lbl} — ${sigLine}`;
+  if (lbl) return lbl;
+  if (sigLine) return sigLine;
+  return '(not connected)';
+}
+if (type === 'Display') {
+  const sig = (meta && meta.signalPretty) ? String(meta.signalPretty) : '';
+  const lbl = (params && typeof params.label === 'string') ? params.label.trim() : '';
+  const val = (params && params.value !== undefined) ? String(params.value) : '';
+  const left = (lbl || sig) ? (lbl || sig) : '(not connected)';
+  if (val) return `${left} = ${val}`;
+  return left;
+}
+if (type === 'Constant')   return `value=${(params && params.value !== undefined) ? params.value : defaults.value}`;
     if (type === 'Gain')       return `k=${(params && params.k !== undefined) ? params.k : defaults.k}`;
     if (type === 'Sum')        return `signs=${(params && params.signs !== undefined) ? params.signs : defaults.signs}`;
     if (type === 'Integrator') return `x0=${(params && params.x0 !== undefined) ? params.x0 : defaults.x0}`;
@@ -866,23 +1043,40 @@ const paper = new joint.dia.Paper({
     return parts.join(', ');
   }
 
-  function computePlotSignalPretty(plotId) {
-    const plotEl = graph.getCell(String(plotId));
-    if (!plotEl) return '';
+  function computeInboundSignalPretty(el, targetPort) {
+  if (!el) return '';
+  const inbound = graph.getConnectedLinks(el, { inbound: true }) || [];
+  const link = inbound.find(l => (l.get('target') || {}).port === targetPort);
+  if (!link) return '';
+  const src = link.get('source') || {};
+  const srcId = String(src.id || '');
+  const srcPort = String(src.port || 'y');
+  const srcEl = graph.getCell(srcId);
+  const srcType = srcEl ? srcEl.get('blockType') : '';
+  if (!srcId) return '';
+  return `${shortTypeName(srcType)} (${srcId}).${srcPort}`;
+}
 
-    // incoming link to Plot.u
-    const inbound = graph.getConnectedLinks(plotEl, { inbound: true });
-    const link = inbound.find(l => (l.get('target') || {}).port === 'u');
-    if (!link) return '';
-
-    const src = link.get('source') || {};
-    const srcId = String(src.id || '');
-    const srcPort = String(src.port || 'y');
-    const srcEl = graph.getCell(srcId);
-    const srcType = srcEl ? srcEl.get('blockType') : '';
-
-    return `${shortTypeName(srcType)} (${srcId}).${srcPort}`;
+function computePlotSignalsPretty(plotId) {
+  const plotEl = graph.getCell(String(plotId));
+  if (!plotEl) return [];
+  const p = plotEl.get('params') || {};
+  const n = Math.max(1, parseInt(p.n ?? 1, 10) || 1);
+  const out = [];
+  for (let i = 1; i <= n; i++) {
+    const port = (n === 1) ? 'u' : ('u' + i);
+    const s = computeInboundSignalPretty(plotEl, port);
+    out.push(s || '(not connected)');
   }
+  return out;
+}
+
+function computeDisplaySignalPretty(displayId) {
+  const el = graph.getCell(String(displayId));
+  if (!el) return '';
+  return computeInboundSignalPretty(el, 'u') || '';
+}
+
 
   function blockText(type, id, params) {
     const shown = shortTypeName(type);
@@ -890,8 +1084,10 @@ const paper = new joint.dia.Paper({
     const desc = (BLOCK_LIBRARY[type] && typeof BLOCK_LIBRARY[type].desc === 'string') ? BLOCK_LIBRARY[type].desc : '';
 
     let sigPretty = '';
-    if (type === 'Plot') sigPretty = computePlotSignalPretty(id) || '';
-    const line = formatParamsLine(type, params || {}, { signalPretty: sigPretty });
+let sigPrettyList = null;
+if (type === 'Plot') sigPrettyList = computePlotSignalsPretty(id);
+if (type === 'Display') sigPretty = computeDisplaySignalPretty(id) || '';
+const line = formatParamsLine(type, params || {}, { signalPretty: sigPretty, signalPrettyList: sigPrettyList });
 
     // Using SVG <text> multiline (\n). JointJS splits lines.
     const parts = [title];
@@ -968,13 +1164,18 @@ graph.on('change:size', (cell) => {
 });
 
 // Keep label upright whenever the element rotates (or is resized).
+graph.on('change:angle', (cell) => { if (cell && !cell.isLink()) updateLabelUpright(cell); });
+graph.on('change:size',  (cell) => { if (cell && !cell.isLink()) updateLabelUpright(cell); });
 
   function createBlockCell(type, x, y, params, forcedId) {
     const spec = BLOCK_LIBRARY[type];
     if (!spec) throw new Error('Unknown type: ' + type);
 
     const id = forcedId ? String(forcedId) : allocId();
-    const p = params ? JSON.parse(JSON.stringify(params)) : JSON.parse(JSON.stringify(spec.defaultParams));
+    const p0 = params ? JSON.parse(JSON.stringify(params)) : JSON.parse(JSON.stringify(spec.defaultParams));
+    let p = p0;
+    if (type === 'Sum') p = __normalizeSumParams(p0);
+    if (type === 'Plot') p = __normalizePlotParams(p0);
 
     const el = new joint.shapes.standard.Rectangle({
       id,
@@ -1004,16 +1205,136 @@ graph.on('change:size', (cell) => {
       }
     });
 
-    // ports
-    el.set('ports', { groups: portGroups, items: [] });
-    const inPorts  = spec.inputs.map(name => ({ id: name, group: 'in' }));
-    const outPorts = spec.outputs.map(name => ({ id: name, group: 'out' }));
-    el.addPorts([...inPorts, ...outPorts]);
+    // ports (some blocks have dynamic number of inputs)
+function __portsFor(type, params) {
+  if (type === 'Sum') {
+    const n = Math.max(2, parseInt((params && params.n) ?? 2, 10) || 2);
+    const ins = Array.from({ length: n }, (_, i) => 'u' + (i + 1));
+    return { inputs: ins, outputs: ['y'] };
+  }
+  if (type === 'Plot') {
+    const n = Math.max(1, parseInt((params && params.n) ?? 1, 10) || 1);
+    const ins = (n === 1) ? ['u'] : Array.from({ length: n }, (_, i) => 'u' + (i + 1));
+    return { inputs: ins, outputs: [] };
+  }
+  if (type === 'Display') {
+    return { inputs: ['u'], outputs: [] };
+  }
+  const s = BLOCK_LIBRARY[type] || { inputs: [], outputs: [] };
+  return { inputs: s.inputs || [], outputs: s.outputs || [] };
+}
+
+el.set('ports', { groups: portGroups, items: [] });
+const dyn = __portsFor(type, p);
+const inPorts  = (dyn.inputs || []).map(name => ({ id: name, group: 'in' }));
+const outPorts = (dyn.outputs || []).map(name => ({ id: name, group: 'out' }));
+el.addPorts([...inPorts, ...outPorts]);
 
     el.addTo(graph);
     updateLabelUpright(el);
     return el;
   }
+
+function __normalizeSumParams(params) {
+  const p = { ...(params || {}) };
+  const n = Math.max(2, parseInt(p.n ?? 2, 10) || 2);
+  p.n = n;
+  let signs = String(p.signs ?? '').trim();
+  if (!signs) signs = '+'.repeat(n);
+  if (signs.length < n) signs = signs + '+'.repeat(n - signs.length);
+  if (signs.length > n) signs = signs.slice(0, n);
+  p.signs = signs;
+  return p;
+}
+
+function __normalizePlotParams(params) {
+  const p = { ...(params || {}) };
+  const n = Math.max(1, parseInt(p.n ?? 1, 10) || 1);
+  p.n = n;
+  return p;
+}
+
+function __rebuildPortsForCell(el) {
+  if (!el || (el.isLink && el.isLink())) return;
+  const type = el.get('blockType');
+  let p = el.get('params') || {};
+  if (type === 'Sum') p = __normalizeSumParams(p);
+  if (type === 'Plot') p = __normalizePlotParams(p);
+  el.set('params', p, { silent: true });
+
+  // Rebuild items
+  el.set('ports', { groups: portGroups, items: [] });
+  // Reuse the same port function used by createBlockCell:
+  const dyn = (function __portsFor(type, params) {
+    if (type === 'Sum') {
+      const n = Math.max(2, parseInt((params && params.n) ?? 2, 10) || 2);
+      const ins = Array.from({ length: n }, (_, i) => 'u' + (i + 1));
+      return { inputs: ins, outputs: ['y'] };
+    }
+    if (type === 'Plot') {
+      const n = Math.max(1, parseInt((params && params.n) ?? 1, 10) || 1);
+      const ins = (n === 1) ? ['u'] : Array.from({ length: n }, (_, i) => 'u' + (i + 1));
+      return { inputs: ins, outputs: [] };
+    }
+    if (type === 'Display') return { inputs: ['u'], outputs: [] };
+    const s = BLOCK_LIBRARY[type] || { inputs: [], outputs: [] };
+    return { inputs: s.inputs || [], outputs: s.outputs || [] };
+  })(type, p);
+
+  const inPorts  = (dyn.inputs || []).map(name => ({ id: name, group: 'in' }));
+  const outPorts = (dyn.outputs || []).map(name => ({ id: name, group: 'out' }));
+  el.addPorts([...inPorts, ...outPorts]);
+}
+
+function refreshAllDisplayNodeLabels() {
+  graph.getElements().forEach(el => {
+    if (el.get('blockType') === 'Display') refreshBlockText(String(el.id));
+  });
+}
+function __formatValueWithFmt(x, fmt) {
+  try {
+    const f = String(fmt || '').trim();
+    const v = (typeof x === 'number') ? x : parseFloat(x);
+    if (!Number.isFinite(v)) return String(x);
+    // very small printf-like: supports %.Nf and %.Ng (g as default)
+    const m = f.match(/^%\.(\d+)([fg])$/i);
+    if (m) {
+      const n = parseInt(m[1], 10) || 4;
+      const t = (m[2] || 'g').toLowerCase();
+      if (t === 'f') return v.toFixed(n);
+      return v.toPrecision(n);
+    }
+    return String(v);
+  } catch(e) {
+    return String(x);
+  }
+}
+
+function updateDisplaysFromLastSim() {
+  const data = __lastSim;
+  if (!data || !data.logs) return;
+  const ds = Array.isArray(window.displaySignals) ? window.displaySignals : [];
+  ds.forEach(s => {
+    const disp = graph.getCell(String(s.displayId));
+    if (!disp) return;
+    const key1 = `${s.block}.${s.port}`;
+    const logs = data.logs || {};
+    let series = logs[key1];
+    if (!series) {
+      // try to match "id(Type).port" style keys
+      const candidates = Object.keys(logs).filter(k => String(k).endsWith(`.${s.port}`) && String(k).includes(String(s.block)));
+      if (candidates.length) series = logs[candidates[0]];
+    }
+    if (!series || !series.length) return;
+    const last = series[series.length - 1];
+    const p = disp.get('params') || {};
+    const fmt = p.fmt ?? '%.4g';
+    const valStr = __formatValueWithFmt(last, fmt);
+    disp.set('params', { ...p, value: valStr });
+    refreshBlockText(String(disp.id));
+  });
+}
+
 
   function refreshBlockText(id) {
     const el = graph.getCell(String(id));
@@ -1129,7 +1450,14 @@ graph.on('change:size', (cell) => {
 
         const newParams = { ...(n.get('params') || {}) , [k]: newVal };
         n.set('params', newParams);
-        refreshBlockText(nodeId);
+// If this param changes port count / signage, rebuild ports
+try {
+  const t = n.get('blockType');
+  if ((t === 'Sum' && (k === 'n' || k === 'signs')) || (t === 'Plot' && k === 'n')) {
+    __rebuildPortsForCell(n);
+  }
+} catch(e) {}
+refreshBlockText(nodeId);
       };
 
       inp.addEventListener('focus', () => { try { inp.select(); } catch(e){} });
@@ -1144,12 +1472,195 @@ graph.on('change:size', (cell) => {
       pe.appendChild(row);
     });
   }
+  // ===== RMB drag copy (duplicate block) =====
+  let __copyDrag = null;
+  let __copyDragDown = false; // guard against duplicate RMB copy triggers
+ // { id }
+  function __isRmb(evt){
+    if (!evt) return false;
+    const oe = evt.originalEvent || evt;
+    // Support MouseEvent, PointerEvent, and some library-wrapped events.
+    const button = (typeof oe.button === 'number') ? oe.button : (typeof evt.button === 'number' ? evt.button : null);
+    const which = (typeof oe.which === 'number') ? oe.which : (typeof evt.which === 'number' ? evt.which : null);
+    const buttons = (typeof oe.buttons === 'number') ? oe.buttons : (typeof evt.buttons === 'number' ? evt.buttons : null);
+    return (button === 2) || (which === 3) || (buttons !== null && (buttons & 2) === 2);
+  }
+  function __startCopyDrag(elementView, evt) {
+    // RMB copy-drag with ghost preview.
+    // We create the clone ONLY on RMB release (mouseup/pointerup),
+    // but we show a lightweight ghost during the drag so the user sees what's happening.
+    const src = elementView && elementView.model;
+    if (!src) return;
+
+    // Guard against multiple handler firings during the same RMB press.
+    if (__copyDragDown) return;
+    __copyDragDown = true;
+
+    const type = src.get('blockType');
+    const params = JSON.parse(JSON.stringify(src.get('params') || {}));
+    const angle = (src.angle && src.angle()) ? (src.angle() || 0) : (src.get('angle') || 0);
+
+    const p = src.position();
+    __copyDrag = { type, params, angle, lastPt: { x: p.x + 20, y: p.y + 20 } };
+
+    // Stop other interactions while copying
+    try { __panning = false; __boxSel = null; __wireDrag = null; } catch(e) {}
+
+    // --- Ghost preview (HTML overlay, not a JointJS element) ---
+    const wrap = document.getElementById('paperWrap');
+    const ghost = document.createElement('div');
+    ghost.className = 'copy-ghost';
+    // Match the source block's footprint (silhouette)
+    try {
+      const sz = src.size ? src.size() : (src.get && src.get('size'));
+      if (sz && sz.width && sz.height) {
+        ghost.style.width = sz.width + 'px';
+        ghost.style.height = sz.height + 'px';
+      }
+    } catch(e) {}
+    const lab = document.createElement('div');
+    lab.className = 'label';
+    lab.textContent = type || 'Block';
+    ghost.appendChild(lab);
+    wrap.appendChild(ghost);
+
+    // helper to position ghost in wrap coords
+    const placeGhost = (clientX, clientY) => {
+      try {
+        const rect = wrap.getBoundingClientRect();
+        const x = clientX - rect.left;
+        const y = clientY - rect.top;
+        ghost.style.left = x + 'px';
+        ghost.style.top = y + 'px';
+      } catch(e) {}
+    };
+
+    // Init ghost position
+    try {
+      const oe = evt && (evt.originalEvent || evt);
+      placeGhost(oe.clientX, oe.clientY);
+    } catch(e) {}
+
+    const move = (e) => {
+      if (!__copyDrag) return;
+      const oe = e && (e.originalEvent || e);
+      // Update last local-paper point
+      try {
+        const pt = paper.clientToLocalPoint({ x: oe.clientX, y: oe.clientY });
+        __copyDrag.lastPt = { x: pt.x, y: pt.y };
+      } catch(_) {}
+      // Update ghost in screen coords
+      placeGhost(oe.clientX, oe.clientY);
+    };
+
+    const cleanup = () => {
+      __copyDrag = null;
+      __copyDragDown = false;
+      try { ghost.remove(); } catch(e) {}
+
+      window.removeEventListener('mousemove', move, true);
+      window.removeEventListener('pointermove', move, true);
+      window.removeEventListener('mouseup', up, true);
+      window.removeEventListener('pointerup', up, true);
+      window.removeEventListener('pointercancel', up, true);
+      window.removeEventListener('contextmenu', cm, true);
+      window.removeEventListener('blur', blur, true);
+    };
+
+    const up = (e) => {
+      // Drop: create the clone at the last recorded position
+      if (!__copyDrag) { cleanup(); return; }
+
+      const drop = __copyDrag.lastPt || { x: p.x + 20, y: p.y + 20 };
+      const clone = createBlockCell(__copyDrag.type, drop.x, drop.y, __copyDrag.params);
+
+      // Center element around drop point
+      try {
+        const sz = clone.size();
+        clone.position(drop.x - (sz.width / 2), drop.y - (sz.height / 2));
+      } catch(e) {}
+
+      // Copy rotation
+      try { clone.rotate(getAngleSnap(__copyDrag.angle || 0), true); } catch(e) {}
+      updateLabelUpright(clone);
+
+      cleanup();
+      try { refreshAllPlotNodeLabels(); } catch(e) {}
+    };
+
+    // Prevent the context menu during RMB copy.
+    const cm = (e) => { try { e.preventDefault(); e.stopPropagation(); } catch(_) {} return false; };
+    const blur = () => cleanup();
+
+    // Listen to BOTH mouse and pointer events (some browsers behave oddly with RMB moves)
+    window.addEventListener('mousemove', move, true);
+    window.addEventListener('pointermove', move, true);
+    window.addEventListener('mouseup', up, true);
+    window.addEventListener('pointerup', up, true);
+    window.addEventListener('pointercancel', up, true);
+    window.addEventListener('contextmenu', cm, true);
+    window.addEventListener('blur', blur, true);
+  }
+
+  // Some JointJS builds/browsers do not reliably emit `element:pointerdown` for RMB.
+  // Add a DOM-level fallback on the paper element. This makes RMB-copy work everywhere.
+  let __rmbFallbackBound = false;
+  function __bindRmbFallback(){
+    if (__rmbFallbackBound) return;
+    __rmbFallbackBound = true;
+    const el = paper && paper.el;
+    if (!el) return;
+
+    const handler = (e) => {
+      if (!__isRmb(e)) return;
+      // Find JointJS view from the event target
+      const view = paper.findView(e.target);
+      if (!view || !view.model) return;
+      if (!view.model.isElement || !view.model.isElement()) return;
+
+      try { e.preventDefault(); e.stopPropagation(); } catch(_) {}
+      __startCopyDrag(view, e);
+    };
+
+    // Pointer events first, mouse as fallback.
+    el.addEventListener('pointerdown', handler, true);
+    el.addEventListener('mousedown', handler, true);
+  }
+  // Bind once now (paper already exists at this point in the script)
+  try { __bindRmbFallback(); } catch(e) {}
 
   // Click-to-select (single click selects exactly one block)
   paper.on('element:pointerdown', (elementView, evt) => {
+    // RMB + drag => copy block (Simulink-like)
+    if (__isRmb(evt)) {
+      try { evt.preventDefault(); evt.stopPropagation(); } catch(e) {}
+      __startCopyDrag(elementView, evt);
+      return;
+    }
+
     if (evt && evt.stopPropagation) evt.stopPropagation();
-    selectedNodeId = String(elementView.model.id);
-    selectedNodeIds = new Set([selectedNodeId]);
+    try { __wireDrag = null; clearHover(); } catch(e) {}
+
+    const additive = !!(evt && evt.ctrlKey);
+    const id = String(elementView.model.id);
+
+    if (!additive) {
+      // Normal click selects exactly one block and clears link selection.
+      try { clearSelectedLinks(); } catch(e) {}
+      selectedNodeId = id;
+      selectedNodeIds = new Set([id]);
+      setSelectedBlocks(selectedNodeIds);
+      renderParamEditor();
+      return;
+    }
+
+    // Ctrl+click toggles block in multi-selection (does not touch link selection).
+    if (!selectedNodeIds) selectedNodeIds = new Set();
+    if (selectedNodeIds.has(id)) selectedNodeIds.delete(id);
+    else selectedNodeIds.add(id);
+
+    const ids = Array.from(selectedNodeIds);
+    selectedNodeId = (ids.length === 1) ? ids[0] : null;
     setSelectedBlocks(selectedNodeIds);
     renderParamEditor();
   });
@@ -1157,6 +1668,8 @@ graph.on('change:size', (cell) => {
   // Left click on blank clears selection (box-select uses DOM handlers below)
   paper.on('blank:pointerdown', (evt) => {
     if (evt && evt.button === 2) return; // RMB reserved for panning
+    if (evt && evt.ctrlKey) return;     // Ctrl+drag may start additive box selection
+    try { __wireDrag = null; clearSelectedLinks(); clearHover(); } catch(e) {}
     selectedNodeId = null;
     selectedNodeIds = new Set();
     clearBlockSelection();
@@ -1205,7 +1718,8 @@ graph.on('change:size', (cell) => {
         // Auto-fill label if empty
         const p = el.get('params') || {};
         const curLabel = (typeof p.label === 'string') ? p.label.trim() : '';
-        const sig = computePlotSignalPretty(el.id) || '';
+        const sigs = computePlotSignalsPretty(el.id) || [];
+        const sig = (sigs && sigs.length) ? sigs.join(' | ') : '';
         if (!curLabel && sig) {
           el.set('params', { ...p, label: sig });
         }
@@ -1219,12 +1733,16 @@ graph.on('change:size', (cell) => {
     if (arrowhead === 'target') {
       enforceOneWirePerInput(link);
       refreshAllPlotNodeLabels();
+      try { updateDisplaysFromLastSim(); } catch(e) {}
+      try { refreshAllDisplayNodeLabels(); } catch(e) {}
     }
   });
   paper.on('link:disconnect', () => refreshAllPlotNodeLabels());
 
   // ===== Hover highlight (ports OR links) + click selection for links =====
   let selectedLinkId = null;
+  let selectedLinkIds = new Set(); // multi-select links
+
 
   // ===== Variant B: Drag wire segment anywhere (auto-creates/moves a vertex) =====
   // How it works:
@@ -1249,8 +1767,12 @@ graph.on('change:size', (cell) => {
   }
 
   paper.on('link:pointerdown', (linkView, evt) => {
+    // Vertex-drag mode is ONLY when holding Shift.
+    // Normal click selects the link (handled in the selection handler below).
+    if (!evt || !evt.shiftKey) { __wireDrag = null; return; }
+
     // Only start "segment drag" when clicking on the visible link path, not on tools/handles.
-    const isPath = evt && evt.target && (evt.target.tagName === 'path' || evt.target.closest && evt.target.closest('path'));
+    const isPath = evt && evt.target && (evt.target.tagName === 'path' || (evt.target.closest && evt.target.closest('path')));
     if (!isPath) return;
 
     const link = linkView.model;
@@ -1270,28 +1792,37 @@ graph.on('change:size', (cell) => {
     evt.stopPropagation();
   });
 
-  paper.on('blank:pointerup', () => { __wireDrag = null; });
-  paper.on('link:pointerup', () => { __wireDrag = null; });
+  function __cancelWireDrag() { __wireDrag = null; }
 
-  paper.on('blank:pointermove', (evt) => {
+  // Robust cancel paths (Joint events can be flaky depending on where the pointer ends up)
+  paper.on('blank:pointerup', __cancelWireDrag);
+  paper.on('link:pointerup', __cancelWireDrag);
+  window.addEventListener('mouseup', __cancelWireDrag, true);
+  window.addEventListener('keyup', (e) => { if (e.key === 'Shift') __cancelWireDrag(); }, true);
+
+  // Move vertex while dragging (must keep holding Shift)
+  window.addEventListener('mousemove', (e) => {
     if (!__wireDrag) return;
+    if (!e.shiftKey) { __cancelWireDrag(); return; }
+
     const link = graph.getCell(__wireDrag.linkId);
-    if (!link) { __wireDrag = null; return; }
-    const p = paper.clientToLocalPoint({ x: evt.clientX, y: evt.clientY });
+    if (!link) { __cancelWireDrag(); return; }
+
+    const p = paper.clientToLocalPoint({ x: e.clientX, y: e.clientY });
     const vs = link.vertices() || [];
     if (__wireDrag.vIndex >= 0 && __wireDrag.vIndex < vs.length) {
       vs[__wireDrag.vIndex] = { x: p.x, y: p.y };
       link.vertices(vs);
     }
-    evt.preventDefault();
-  });
+    e.preventDefault();
+  }, true);
 
   const hoverLinks = new Set();
 
   function clearHover() {
     for (const id of hoverLinks) {
       const l = graph.getCell(id);
-      if (l && l.isLink() && id !== selectedLinkId) {
+      if (l && l.isLink() && !selectedLinkIds.has(String(id))) {
         l.attr('line/strokeWidth', 2.2);
         l.attr('line/filter', null);
       }
@@ -1303,37 +1834,96 @@ graph.on('change:size', (cell) => {
     clearHover();
     links.forEach(l => {
       if (!l) return;
-      if (String(l.id) === selectedLinkId) return;
+      if (selectedLinkIds.has(String(l.id))) return;
       l.attr('line/strokeWidth', 3.6);
       hoverLinks.add(String(l.id));
     });
   }
 
-  function setSelectedLink(link) {
-    // reset old
-    if (selectedLinkId) {
-      const old = graph.getCell(String(selectedLinkId));
-      if (old && old.isLink()) {
-        old.attr('line/stroke', '#4a90e2');
-        old.attr('line/strokeWidth', 2.2);
-      }
-    }
-    selectedLinkId = link ? String(link.id) : null;
-    if (selectedLinkId) {
-      const l = graph.getCell(selectedLinkId);
-      if (l && l.isLink()) {
-        l.attr('line/stroke', '#8b5cf6');
-        l.attr('line/strokeWidth', 3.8);
-      }
+  
+  function __resetLinkStyleById(id) {
+    const l = graph.getCell(String(id));
+    if (l && l.isLink()) {
+      l.attr('line/stroke', '#4a90e2');
+      l.attr('line/strokeWidth', 2.2);
     }
   }
 
-  paper.on('link:pointerdown', (linkView) => {
-    if (__wireDrag) return; // don't fight with segment-drag handler
-    setSelectedLink(linkView.model);
-  });paper.on('blank:pointerclick', () => {
-    setSelectedLink(null);
-    clearHover();
+  function __applyLinkSelectedStyleById(id) {
+    const l = graph.getCell(String(id));
+    if (l && l.isLink()) {
+      l.attr('line/stroke', '#8b5cf6');
+      l.attr('line/strokeWidth', 3.8);
+    }
+  }
+
+  function clearSelectedLinks() {
+    selectedLinkIds.forEach(id => __resetLinkStyleById(id));
+    selectedLinkIds.clear();
+    selectedLinkId = null;
+  }
+
+  function setSelectedLinks(ids, opts = {}) {
+    // opts.additive: if true, add to existing selection; otherwise replace
+    const additive = !!opts.additive;
+
+    if (!additive) clearSelectedLinks();
+
+    (ids || []).forEach(id => {
+      const sid = String(id);
+      if (!selectedLinkIds.has(sid)) {
+        selectedLinkIds.add(sid);
+        __applyLinkSelectedStyleById(sid);
+      }
+    });
+
+    // Keep a single "active" id for legacy code paths
+    selectedLinkId = selectedLinkIds.size ? Array.from(selectedLinkIds)[0] : null;
+  }
+
+  function toggleSelectedLink(id) {
+    const sid = String(id);
+    if (selectedLinkIds.has(sid)) {
+      selectedLinkIds.delete(sid);
+      __resetLinkStyleById(sid);
+    } else {
+      selectedLinkIds.add(sid);
+      __applyLinkSelectedStyleById(sid);
+    }
+    selectedLinkId = selectedLinkIds.size ? Array.from(selectedLinkIds)[0] : null;
+  }
+
+  // Backward-compatible API: set one selected link (replaces selection)
+  function setSelectedLink(link) {
+    if (!link) { clearSelectedLinks(); return; }
+    setSelectedLinks([String(link.id)], { additive: false });
+  }
+
+
+  paper.on('link:pointerdown', (linkView, evt) => {
+    // If we're in Shift vertex-drag mode, don't treat this as selection.
+    if (evt && evt.shiftKey) return;
+
+    // Prevent Joint's default link interactions (e.g., moving vertices/segments) on normal click/drag.
+    try { evt.preventDefault(); evt.stopPropagation(); } catch(e) {}
+    // Any normal click cancels a potentially stuck drag state.
+    __wireDrag = null;
+
+    const additive = !!(evt && evt.ctrlKey);
+
+    // If not additive, selecting a link clears block selection (classic behavior).
+    if (!additive) {
+      try {
+        selectedNodeId = null;
+        selectedNodeIds = new Set();
+        clearBlockSelection();
+        renderParamEditor();
+      } catch (e) {}
+    }
+
+    // Ctrl+click toggles link in multi-selection; normal click selects exactly one link.
+    if (additive) toggleSelectedLink(linkView.model.id);
+    else setSelectedLink(linkView.model);
   });
 
   // Hover link
@@ -1355,6 +1945,9 @@ graph.on('change:size', (cell) => {
     if (filtered.length) highlightLinks(filtered);
   });
   paper.on('element:mouseleave', () => clearHover());
+
+  // Delete key handling is implemented above (supports multi-select links + blocks).
+
   // ===== Public API: addBlock/save/load/exportGraph/simulate =====
   window.addBlock = function addBlock(type) {
     const spec = BLOCK_LIBRARY[type];
@@ -1435,6 +2028,8 @@ graph.on('change:size', (cell) => {
         nextId = Math.max(nextId, maxId + 1);
 
         refreshAllPlotNodeLabels();
+      try { updateDisplaysFromLastSim(); } catch(e) {}
+      try { refreshAllDisplayNodeLabels(); } catch(e) {}
         renderParamEditor();
 
         // history: snapshot after load
@@ -1450,72 +2045,90 @@ graph.on('change:size', (cell) => {
 
   // Export graph in the SAME structure your /simulate endpoint expects
   window.exportGraph = function exportGraph() {
-    const blocks = [];
-    const wires = [];
+  const blocks = [];
+  const wires = [];
 
-    const elems = graph.getElements();
+  const elems = graph.getElements();
 
-    // blocks (exclude Plot)
-    elems.forEach(el => {
-      const type = el.get('blockType');
-      if (type === 'Plot') return;
-      blocks.push({
-        id: String(el.id),
-        type,
-        params: el.get('params') || {},
-        ui: { x: el.position().x, y: el.position().y, rotationDeg: getAngleSnap(el.angle() || 0) }
-      });
+  // blocks (exclude Plot + Display from simulation)
+  elems.forEach(el => {
+    const type = el.get('blockType');
+    if (type === 'Plot' || type === 'Display') return;
+    blocks.push({
+      id: String(el.id),
+      type,
+      params: el.get('params') || {},
+      ui: { x: el.position().x, y: el.position().y, rotationDeg: getAngleSnap(el.angle() || 0) }
     });
+  });
 
-    // plotSignals (Plot scopes)
-    const plotSignals = [];
-    elems.forEach(el => {
-      const type = el.get('blockType');
-      if (type !== 'Plot') return;
+  // Collect signals requested by Plot and Display
+  const plotSignals = [];
+  const displaySignals = [];
+
+  elems.forEach(el => {
+    const type = el.get('blockType');
+    if (type === 'Plot') {
       const p = el.get('params') || {};
-      const lbl = (typeof p.label === 'string') ? p.label : '';
-
-      const inbound = graph.getConnectedLinks(el, { inbound: true });
+      const n = Math.max(1, parseInt(p.n ?? 1, 10) || 1);
+      for (let i = 1; i <= n; i++) {
+        const port = (n === 1) ? 'u' : ('u' + i);
+        const inbound = graph.getConnectedLinks(el, { inbound: true }) || [];
+        const link = inbound.find(l => (l.get('target') || {}).port === port);
+        if (!link) continue;
+        const src = link.get('source') || {};
+        if (!src.id || !src.port) continue;
+        const srcEl = graph.getCell(String(src.id));
+        if (!srcEl || srcEl.get('blockType') === 'Plot' || srcEl.get('blockType') === 'Display') continue;
+        plotSignals.push({ plotId: String(el.id), block: String(src.id), port: String(src.port) });
+      }
+    } else if (type === 'Display') {
+      const p = el.get('params') || {};
+      const inbound = graph.getConnectedLinks(el, { inbound: true }) || [];
       const link = inbound.find(l => (l.get('target') || {}).port === 'u');
       if (!link) return;
       const src = link.get('source') || {};
       if (!src.id || !src.port) return;
       const srcEl = graph.getCell(String(src.id));
-      if (!srcEl) return;
-      if (srcEl.get('blockType') === 'Plot') return;
+      if (!srcEl || srcEl.get('blockType') === 'Plot' || srcEl.get('blockType') === 'Display') return;
+      displaySignals.push({ displayId: String(el.id), block: String(src.id), port: String(src.port) });
+    }
+  });
 
-      plotSignals.push({ plotId: String(el.id), block: String(src.id), port: String(src.port), label: lbl });
+  // wires: every link where source/target are NOT Plot/Display
+  graph.getLinks().forEach(l => {
+    const src = l.get('source') || {};
+    const tgt = l.get('target') || {};
+    if (!src.id || !src.port || !tgt.id || !tgt.port) return;
+    const srcEl = graph.getCell(String(src.id));
+    const tgtEl = graph.getCell(String(tgt.id));
+    if (!srcEl || !tgtEl) return;
+    if (srcEl.get('blockType') === 'Plot' || srcEl.get('blockType') === 'Display') return;
+    if (tgtEl.get('blockType') === 'Plot' || tgtEl.get('blockType') === 'Display') return;
+    wires.push({
+      from: { block: String(src.id), port: String(src.port) },
+      to:   { block: String(tgt.id), port: String(tgt.port) }
     });
+  });
 
-    // wires: every link where target is NOT Plot
-    graph.getLinks().forEach(l => {
-      const src = l.get('source') || {};
-      const tgt = l.get('target') || {};
-      if (!src.id || !src.port || !tgt.id || !tgt.port) return;
-      const srcEl = graph.getCell(String(src.id));
-      const tgtEl = graph.getCell(String(tgt.id));
-      if (!srcEl || !tgtEl) return;
-      if (srcEl.get('blockType') === 'Plot') return;
-      if (tgtEl.get('blockType') === 'Plot') return; // exclude Plot from simulation wires
+  // Build scopes from plot+display signals (unique); fallback: Integrator.y
+  const scopeSignals =
+    ((plotSignals.length || displaySignals.length)
+      ? Array.from(new Map(
+          [...plotSignals, ...displaySignals].map(s => [`${s.block}.${s.port}`, { block: s.block, port: s.port }])
+        ).values())
+      : blocks.filter(b => b.type === 'Integrator').map(b => ({ block: b.id, port: 'y' }))
+    );
 
-      wires.push({
-        from: { block: String(src.id), port: String(src.port) },
-        to:   { block: String(tgt.id), port: String(tgt.port) }
-      });
-    });
+  const scopes = [{ signals: scopeSignals }];
 
-    const scopeSignals =
-      (plotSignals.length
-        ? Array.from(new Map(plotSignals.map(s => [`${s.block}.${s.port}`, { block: s.block, port: s.port }])).values())
-        : blocks.filter(b => b.type === 'Integrator').map(b => ({ block: b.id, port: 'y' }))
-      );
+  // Expose display mapping so simulate() can update Display blocks after run
+  window.displaySignals = displaySignals;
 
-    const scopes = [{ signals: scopeSignals }];
-
-    const graphOut = { blocks, wires, scopes };
-    document.getElementById('jsonOut').textContent = JSON.stringify(graphOut, null, 2);
-    return graphOut;
-  };
+  const graphOut = { blocks, wires, scopes };
+  document.getElementById('jsonOut').textContent = JSON.stringify(graphOut, null, 2);
+  return graphOut;
+};
   // Compute a stable signature of the current graph relevant for simulation results.
   function __graphSignature() {
     try {
@@ -1559,7 +2172,8 @@ graph.on('change:size', (cell) => {
     const t1 = parseFloat(document.getElementById('t1').value);
     const dt = parseFloat(document.getElementById('dt').value);
 
-    const payload = { graph: graphPayload, t0, t1, dt };
+    const solver = (document.getElementById('solver') && document.getElementById('solver').value) ? document.getElementById('solver').value : 'rk45';
+    const payload = { graph: graphPayload, t0, t1, dt, solver };
 
     try { toggleOutput(true); } catch(e) {}
     document.getElementById('out').textContent = 'Running...';
@@ -1609,6 +2223,8 @@ graph.on('change:size', (cell) => {
       }
 
       refreshAllPlotNodeLabels();
+      try { updateDisplaysFromLastSim(); } catch(e) {}
+      try { refreshAllDisplayNodeLabels(); } catch(e) {}
 
     } catch(e) {
       document.getElementById('out').textContent = 'Fetch failed: ' + e;
@@ -1616,89 +2232,170 @@ graph.on('change:size', (cell) => {
   };
 
   // ===== Double-click on Plot block: open its own plot window =====
-  function openPlotForPlotNode(plotNodeId) {
-    const el = graph.getCell(String(plotNodeId));
-    if (!el) return;
+  // ===== Double-click on Plot block: open its own plot window =====
+function openPlotForPlotNode(plotNodeId) {
+  const el = graph.getCell(String(plotNodeId));
+  if (!el) return;
 
-    const p = el.get('params') || {};
-    const label = (typeof p.label === 'string' && p.label.trim()) ? p.label.trim() : `Plot ${plotNodeId}`;
+  const p = el.get('params') || {};
+  const label = (typeof p.label === 'string' && p.label.trim()) ? p.label.trim() : `Plot ${plotNodeId}`;
+  const n = Math.max(1, parseInt(p.n ?? 1, 10) || 1);
 
-    const titleEl = document.getElementById('plotTitle');
-    if (titleEl) titleEl.textContent = label;
+  const titleEl = document.getElementById('plotTitle');
+  if (titleEl) titleEl.textContent = label;
 
-    // If we have no simulation yet OR the graph has changed since last simulation, re-run simulate first.
-    const curSig = __graphSignature();
-    if (!__lastSim || !__lastSim.t || !__lastSim.logs || !__lastSimSig || (curSig && __lastSimSig !== curSig)) {
-      try { toggleOutput(true); } catch(e) {}
-      window.simulate().then(() => setTimeout(() => openPlotForPlotNode(plotNodeId), 0));
-      return;
-    }
-
-    const keys = Object.keys(__lastSim.logs || {});
-    if (!keys.length) return;
-
-    // Resolve which signal belongs to THIS Plot block (based on its input link)
-    const inbound = graph.getConnectedLinks(el, { inbound: true });
-    const link = inbound.find(l => (l.get('target') || {}).port === 'u');
-
-    let key = keys[0];
-    let pretty = '';
-    let foundKey = false;
-
-    if (link) {
-      const src = link.get('source') || {};
-      const srcId = String(src.id || '');
-      const port = String(src.port || 'y');
-
-      const srcEl = graph.getCell(srcId);
-      const srcType = srcEl ? srcEl.get('blockType') : '';
-
-      const candidates = [
-        `${srcId}(${srcType}).${port}`,
-        `${srcId}.${port}`,
-        `${srcType}(${srcId}).${port}`,
-        `${srcType}${srcId}.${port}`,
-        `${srcId}:${port}`,
-      ];
-      for (const cand of candidates) {
-        if (Object.prototype.hasOwnProperty.call(__lastSim.logs, cand)) { key = cand; foundKey = true; break; }
-      }
-
-      const re1 = new RegExp(`^${srcId}\\([^)]*\\)\\.${port}$`);
-      for (const k of keys) if (re1.test(k)) { key = k; foundKey = true; break; }
-
-      pretty = `${shortTypeName(srcType)} (${srcId}).${port}`;
-    }
-
-    // If this Plot was added/rewired after the last simulation, its signal might not exist in logs yet.
-    // In that case, re-run simulate and reopen instead of showing a wrong (default) trace.
-    if (link && !foundKey) {
-      try { toggleOutput(true); } catch(e) {}
-      window.simulate().then(() => setTimeout(() => openPlotForPlotNode(plotNodeId), 0));
-      return;
-    }
-
-    const metaEl = document.getElementById('plotMeta');
-    if (metaEl) {
-      const txt = pretty ? ((pretty === key) ? `Signal: ${pretty}` : `Signal: ${pretty}  (log key: ${key})`) : `Signal log key: ${key}`;
-      metaEl.textContent = txt;
-    }
-
-    togglePlotWindow(true);
-    if (typeof Plotly !== 'undefined') {
-      Plotly.newPlot(
-        'plotCanvas',
-        [{ x: __lastSim.t, y: __lastSim.logs[key], mode: 'lines', name: (pretty || prettyLabelForLogKey(key) || key) }],
-        { title: label, xaxis: { title: 't' }, yaxis: { title: 'value' } },
-        { responsive: true }
-      );
-    }
+  // If we have no simulation yet OR the graph has changed since last simulation, re-run simulate first.
+  const curSig = __graphSignature();
+  if (!__lastSim || !__lastSim.t || !__lastSim.logs || !__lastSimSig || (curSig && __lastSimSig !== curSig)) {
+    try { toggleOutput(true); } catch(e) {}
+    window.simulate().then(() => setTimeout(() => openPlotForPlotNode(plotNodeId), 0));
+    return;
   }
 
-  paper.on('element:pointerdblclick', (elementView) => {
+  const logs = __lastSim.logs || {};
+  const keys = Object.keys(logs);
+  if (!keys.length) return;
+
+  // Build traces for each connected input
+  const traces = [];
+  const meta = [];
+  for (let i = 1; i <= n; i++) {
+    const port = (n === 1) ? 'u' : ('u' + i);
+    const inbound = graph.getConnectedLinks(el, { inbound: true }) || [];
+    const link = inbound.find(l => (l.get('target') || {}).port === port);
+    if (!link) continue;
+
+    const src = link.get('source') || {};
+    const srcId = String(src.id || '');
+    const srcPort = String(src.port || 'y');
+    const srcEl = graph.getCell(srcId);
+    const srcType = srcEl ? srcEl.get('blockType') : '';
+
+    const candidates = [
+      `${srcId}(${srcType}).${srcPort}`,
+      `${srcId}.${srcPort}`
+    ];
+
+    const key = candidates.find(k => k in logs) || candidates.find(k => keys.includes(k)) || null;
+    if (!key) continue;
+
+    const pretty = `${shortTypeName(srcType)} (${srcId}).${srcPort}`;
+    traces.push({ x: __lastSim.t, y: logs[key], mode: 'lines', name: pretty });
+    meta.push(`${port}: ${pretty}`);
+  }
+
+  const metaEl = document.getElementById('plotMeta');
+  if (metaEl) metaEl.textContent = meta.length ? meta.join(' | ') : 'No connected signals.';
+
+  togglePlotWindow(true);
+  if (typeof Plotly !== 'undefined') {
+    Plotly.newPlot('plotCanvas', traces, { title: label, xaxis: { title: 't' }, yaxis: { title: 'value' } }, { responsive: true });
+  }
+}
+
+paper.on('element:pointerdblclick', (elementView) => {
     const el = elementView.model;
     if (el && el.get('blockType') === 'Plot') openPlotForPlotNode(String(el.id));
   });
+
+
+  // ===== Multiple open schemes (tabs) =====
+  const __schemes = []; // { name, state }
+  let __activeScheme = -1;
+
+  function __captureSchemeState() {
+    return { graph: graph.toJSON(), nextId };
+  }
+
+  function __restoreSchemeState(state) {
+    if (!state) return;
+    graph.fromJSON(state.graph || {});
+    nextId = Math.max(1, parseInt(state.nextId || '1', 10));
+    // Clear selection
+    try {
+      selectedNodeId = null;
+      selectedNodeIds = new Set();
+      clearBlockSelection();
+      clearSelectedLinks();
+      renderParamEditor();
+      refreshAllPlotNodeLabels();
+      updateDisplaysFromLastSim();
+      refreshAllDisplayNodeLabels();
+    } catch(e) {}
+    try { __pushUndoSnapshot(); } catch(e) {}
+  }
+
+  function __renderSchemeTabs() {
+    const bar = document.getElementById('schemeTabs');
+    if (!bar) return;
+    bar.innerHTML = '';
+
+    __schemes.forEach((s, i) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'stab' + (i === __activeScheme ? ' active' : '');
+      const name = (s && s.name) ? String(s.name) : ('Scheme ' + (i + 1));
+      b.innerHTML = `<span class="n">${escapeHtml(name)}</span><span class="x" title="Close">×</span>`;
+      b.addEventListener('click', (ev) => {
+        const isClose = ev && ev.target && (ev.target.classList && ev.target.classList.contains('x'));
+        if (isClose) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          __closeScheme(i);
+          return;
+        }
+        __switchScheme(i);
+      });
+      bar.appendChild(b);
+    });
+
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'stab stabAdd';
+    add.textContent = '+ New scheme';
+    add.addEventListener('click', () => __newScheme());
+    bar.appendChild(add);
+  }
+
+  function __switchScheme(i) {
+    if (i === __activeScheme) return;
+    if (__activeScheme >= 0 && __schemes[__activeScheme]) {
+      __schemes[__activeScheme].state = __captureSchemeState();
+    }
+    __activeScheme = i;
+    __restoreSchemeState(__schemes[i].state);
+    __renderSchemeTabs();
+  }
+
+  function __newScheme() {
+    if (__activeScheme >= 0 && __schemes[__activeScheme]) {
+      __schemes[__activeScheme].state = __captureSchemeState();
+    }
+    const name = 'Scheme ' + (__schemes.length + 1);
+    const state = { graph: { cells: [] }, nextId: 1 };
+    __schemes.push({ name, state });
+    __activeScheme = __schemes.length - 1;
+    graph.clear();
+    nextId = 1;
+    try { __pushUndoSnapshot(); } catch(e) {}
+    __renderSchemeTabs();
+  }
+
+  function __closeScheme(i) {
+    if (__schemes.length <= 1) return; // keep at least one
+    if (i === __activeScheme) {
+      // Close active: switch to neighbor
+      const next = (i > 0) ? (i - 1) : 0;
+      __schemes.splice(i, 1);
+      __activeScheme = Math.min(next, __schemes.length - 1);
+      __restoreSchemeState(__schemes[__activeScheme].state);
+    } else {
+      __schemes.splice(i, 1);
+      if (i < __activeScheme) __activeScheme -= 1;
+    }
+    __renderSchemeTabs();
+  }
+
 
   // ===== Auto-load default model on load (from default_scheme.json) =====
 (async () => {
@@ -1719,7 +2416,7 @@ graph.on('change:size', (cell) => {
 
       // pokud podporuješ rotaci:
       if (typeof el.angle === 'number' && cell && typeof cell.rotate === 'function') {
-        cell.rotate(getAngleSnap(el.angle), true);
+        cell.rotate(el.angle, { absolute: true });
       } else if (typeof el.angle === 'number' && cell) {
         // fallback: některé implementace mají přímo atribut angle
         try { cell.set('angle', el.angle); } catch (e) {}
@@ -1747,6 +2444,15 @@ graph.on('change:size', (cell) => {
     refreshAllPlotNodeLabels();
     setStatus('Default scheme loaded: default_scheme.json');
 
+    // Initialize scheme tabs if needed
+    if (!__schemes.length) {
+      __schemes.push({ name: 'Default', state: __captureSchemeState() });
+      __activeScheme = 0;
+    } else {
+      __schemes[__activeScheme].state = __captureSchemeState();
+    }
+    __renderSchemeTabs();
+
     // history: snapshot after default model creation
     try { __pushUndoSnapshot(); } catch (e) {}
 
@@ -1755,10 +2461,14 @@ graph.on('change:size', (cell) => {
     console.error(e);
   }
 
+  if (!__schemes.length) {
+    __schemes.push({ name: 'Scheme 1', state: __captureSchemeState() });
+    __activeScheme = 0;
+    __renderSchemeTabs();
+  }
   setStatus('Editor started.');
 })();
 });
-
 </script>
 </body>
 </html>

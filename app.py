@@ -6,6 +6,7 @@ mimetypes.add_type("text/javascript", ".mjs")
 from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple, Callable, Optional, Set
 from flask import Flask, request, jsonify
+from flask import send_from_directory
 from werkzeug.exceptions import BadRequest
 import traceback
 import numpy as np
@@ -113,20 +114,48 @@ def parse_graph(g: Dict[str, Any]) -> Tuple[Dict[str, Dict[str, Any]], List[Wire
     return blocks_by_id, wires, scope_refs
 
 def validate_ports(blocks_by_id: Dict[str, Dict[str, Any]], wires: List[Wire]) -> None:
-    # ensure all wire endpoints exist and match port directions/spec
+    """Ensure all wire endpoints exist and match port directions/spec.
+
+    Note: Some blocks have dynamic inputs (e.g., Sum: u1..uN).
+    """
+
+    def _inputs_for(b: Dict[str, Any]) -> List[str]:
+        btype = b["type"]
+        if btype == "Sum":
+            p = b.get("params", {}) or {}
+            n = int(p.get("n", 0) or 0)
+            if n <= 0:
+                # fallback to signs length or default 2
+                signs = str(p.get("signs", "++"))
+                n = max(2, len(signs) if signs else 2)
+            n = max(2, n)
+            return [f"u{i}" for i in range(1, n + 1)]
+        return list(BLOCK_SPECS[btype]["inputs"])
+
+    def _outputs_for(b: Dict[str, Any]) -> List[str]:
+        return list(BLOCK_SPECS[b["type"]]["outputs"])
+
     for w in wires:
         fr = w.get("from", {})
         to = w.get("to", {})
         a_id, a_port = fr.get("block"), fr.get("port")
         b_id, b_port = to.get("block"), to.get("port")
-        if a_id not in blocks_by_id or b_id not in blocks_by_id:
-            raise GraphError("Wire references unknown block id.")
-        a_type = blocks_by_id[a_id]["type"]
-        b_type = blocks_by_id[b_id]["type"]
-        if a_port not in BLOCK_SPECS[a_type]["outputs"]:
-            raise GraphError(f"Invalid output port {a_port} on block {a_id}:{a_type}")
-        if b_port not in BLOCK_SPECS[b_type]["inputs"]:
-            raise GraphError(f"Invalid input port {b_port} on block {b_id}:{b_type}")
+
+        if not a_id or not a_port or not b_id or not b_port:
+            raise GraphError("Wire endpoints must have block and port.")
+
+        if a_id not in blocks_by_id:
+            raise GraphError(f"Wire source block missing: {a_id}")
+        if b_id not in blocks_by_id:
+            raise GraphError(f"Wire target block missing: {b_id}")
+
+        a = blocks_by_id[a_id]
+        b = blocks_by_id[b_id]
+
+        if a_port not in _outputs_for(a):
+            raise GraphError(f"Invalid source port: {a_id}({a['type']}).{a_port}")
+        if b_port not in _inputs_for(b):
+            raise GraphError(f"Invalid target port: {b_id}({b['type']}).{b_port}")
 
 def build_input_map(wires: List[Wire]) -> Dict[Tuple[str, str], Tuple[str, str]]:
     """
@@ -146,13 +175,24 @@ def build_input_map(wires: List[Wire]) -> Dict[Tuple[str, str], Tuple[str, str]]
 
 def validate_required_inputs(blocks_by_id: Dict[str, Dict[str, Any]], input_map: Dict[Tuple[str, str], Tuple[str, str]]) -> None:
     for bid, b in blocks_by_id.items():
-        spec = BLOCK_SPECS[b["type"]]
-        for inp in spec["inputs"]:
+        btype = b["type"]
+        if btype == "Sum":
+            p = b.get("params", {}) or {}
+            n = int(p.get("n", 0) or 0)
+            if n <= 0:
+                signs = str(p.get("signs", "++"))
+                n = max(2, len(signs) if signs else 2)
+            n = max(2, n)
+            req = [f"u{i}" for i in range(1, n + 1)]
+        else:
+            req = list(BLOCK_SPECS[btype]["inputs"])
+
+        for inp in req:
             if (bid, inp) not in input_map:
-                raise GraphError(f"Missing required input: {bid}({b['type']}).{inp}")
+                raise GraphError(f"Missing required input: {bid}({btype}).{inp}")
 
 # ----------------------------
-# Topological ordering (algebraic only)
+# Topological ordering (algebraic only) (algebraic only)
 # ----------------------------
 
 def build_dependency_graph(blocks_by_id: Dict[str, Dict[str, Any]], wires: List[Wire]) -> Dict[str, Set[str]]:
@@ -232,10 +272,26 @@ def eval_block(
         signals[out_key(bid, "y")] = amp * np.sin(2.0 * np.pi * freq_hz * t + phase)
 
     elif btype == "Sum":
+        p = block.get("params", {}) or {}
         signs = str(get_param(block, "signs", "++")).strip()
-        s1 = -1.0 if (len(signs) > 0 and signs[0] == "-") else 1.0
-        s2 = -1.0 if (len(signs) > 1 and signs[1] == "-") else 1.0
-        signals[out_key(bid, "y")] = float(s1 * inp("u1") + s2 * inp("u2"))
+        n = int(p.get("n", 0) or 0)
+        if n <= 0:
+            n = max(2, len(signs) if signs else 2)
+        n = max(2, n)
+
+        # normalize signs to length n
+        if not signs:
+            signs = "+" * n
+        if len(signs) < n:
+            signs = signs + "+" * (n - len(signs))
+        if len(signs) > n:
+            signs = signs[:n]
+
+        acc = 0.0
+        for i in range(1, n + 1):
+            sgn = -1.0 if signs[i - 1] == "-" else 1.0
+            acc += sgn * float(inp(f"u{i}"))
+        signals[out_key(bid, "y")] = float(acc)
 
     elif btype == "Gain":
         k = float(get_param(block, "k", 1.0))
@@ -410,14 +466,77 @@ def make_rhs(compiled: Dict[str, Any]) -> Callable[[float, np.ndarray], np.ndarr
 
     return rhs
 
-def simulate(graph: Dict[str, Any], t0: float, t1: float, dt: float) -> Dict[str, Any]:
+
+def _integrate_fixed_step(rhs: Callable[[float, np.ndarray], np.ndarray],
+                          x0: np.ndarray,
+                          t_eval: np.ndarray,
+                          method: str) -> Tuple[np.ndarray, np.ndarray]:
+    """Simple fixed-step explicit integrators.
+
+    Returns: (t, Y) where Y shape is (n_states, n_times) like solve_ivp.y.
+    """
+    method = (method or "rk4").lower()
+    n = x0.size
+    m = t_eval.size
+    Y = np.zeros((n, m), dtype=float)
+    Y[:, 0] = x0
+    for k in range(m - 1):
+        t = float(t_eval[k])
+        h = float(t_eval[k + 1] - t_eval[k])
+        x = Y[:, k]
+
+        if method in ("euler", "fe", "forwardeuler"):
+            k1 = rhs(t, x)
+            x_next = x + h * k1
+
+        elif method in ("rk2", "heun", "improvedeuler"):
+            k1 = rhs(t, x)
+            k2 = rhs(t + h, x + h * k1)
+            x_next = x + (h * 0.5) * (k1 + k2)
+
+        elif method in ("rk4",):
+            k1 = rhs(t, x)
+            k2 = rhs(t + 0.5 * h, x + 0.5 * h * k1)
+            k3 = rhs(t + 0.5 * h, x + 0.5 * h * k2)
+            k4 = rhs(t + h, x + h * k3)
+            x_next = x + (h / 6.0) * (k1 + 2*k2 + 2*k3 + k4)
+
+        else:
+            raise GraphError(f"Unknown fixed-step solver: {method}")
+
+        Y[:, k + 1] = x_next
+
+    return t_eval, Y
+
+def simulate(graph: Dict[str, Any], t0: float, t1: float, dt: float, solver: str = 'rk45') -> Dict[str, Any]:
     compiled = compile_model(graph)
     rhs = make_rhs(compiled)
 
     x0 = compiled["x0"]
     t_eval = np.arange(t0, t1 + 1e-12, dt)
 
-    sol = solve_ivp(rhs, (t0, t1), x0, t_eval=t_eval, rtol=1e-6, atol=1e-9)
+    solver_l = (solver or 'rk45').strip().lower()
+    if solver_l in ('euler', 'rk2', 'heun', 'rk4'):
+        t_out, y_out = _integrate_fixed_step(rhs, x0, t_eval, solver_l)
+        sol = type('Sol', (), {})()
+        sol.t = t_out
+        sol.y = y_out
+        sol.success = True
+        sol.message = f'fixed-step {solver_l}'
+    else:
+        # Delegate to SciPy solve_ivp (variable-step) for methods like RK45, Radau, BDF...
+        # We still report results on the requested t_eval grid.
+        method_map = {
+            'rk45': 'RK45',
+            'rk23': 'RK23',
+            'dop853': 'DOP853',
+            'radau': 'Radau',
+            'bdf': 'BDF',
+            'lsoda': 'LSODA',
+        }
+        scipy_method = method_map.get(solver_l, solver)
+        sol = solve_ivp(rhs, (t0, t1), x0, t_eval=t_eval, method=scipy_method, rtol=1e-6, atol=1e-9)
+
 
     # Recompute logged signals at each t_eval using the same evaluation
     # (Simple approach; for MVP size it’s fine.)
@@ -461,6 +580,7 @@ def simulate(graph: Dict[str, Any], t0: float, t1: float, dt: float) -> Dict[str
             logs[sig_name(ref)].append(float(signals[out_key(ref.block, ref.port)]))
 
     return {
+        "solver": solver,
         "t": sol.t.tolist(),
         "x": sol.y.T.tolist(),  # list of state vectors over time
         "logs": logs,
@@ -514,7 +634,9 @@ def api_simulate():
         if t1 < t0:
             return jsonify({"error": "t1 must be >= t0"}), 400
 
-        return jsonify(simulate(graph, t0, t1, dt))
+        solver = str(payload.get('solver', 'rk45'))
+
+        return jsonify(simulate(graph, t0, t1, dt, solver=solver))
 
     except BadRequest as e:
         return jsonify({"error": f"Bad JSON request: {e}"}), 400
@@ -531,6 +653,10 @@ from flask import send_from_directory
 @app.route("/")
 def index():
     return send_from_directory(app.root_path, "index.html")
+
+@app.route("/favicon.ico")
+def favicon():
+    return send_from_directory(app.static_folder, "favicon.ico", mimetype="image/vnd.microsoft.icon")
 
 if __name__ == "__main__":
     app.run(debug=True)
