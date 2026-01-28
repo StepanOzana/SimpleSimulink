@@ -58,6 +58,13 @@ BLOCK_SPECS = {
         "params": {"x0": 0.0},
     },
 
+    # Discontinuities
+    "Saturation": {
+        "inputs": ["u"],
+        "outputs": ["y"],
+        "params": {"lower": -1.0, "upper": 1.0},
+    },
+
     # Continuous-time Transfer Function block (strictly proper in MVP).
     # Parameters are CSV strings like "1" and "1,1" (highest power first).
     "TransferFunction": {
@@ -236,6 +243,14 @@ def eval_block(
 
     elif btype == "Product":
         signals[out_key(bid, "y")] = float(inp("u1") * inp("u2"))
+
+    elif btype == "Saturation":
+        lo = float(get_param(block, "lower", -1.0))
+        hi = float(get_param(block, "upper", 1.0))
+        u = float(inp("u"))
+        if lo > hi:
+            lo, hi = hi, lo
+        signals[out_key(bid, "y")] = float(min(max(u, lo), hi))
 
     else:
         raise GraphError(f"eval_block not implemented for type {btype}")
@@ -493,6 +508,12 @@ def api_simulate():
         t1 = float(payload.get("t1", 10.0))
         dt = float(payload.get("dt", 0.01))
 
+        # basic validation
+        if dt <= 0:
+            return jsonify({"error": "dt must be > 0"}), 400
+        if t1 < t0:
+            return jsonify({"error": "t1 must be >= t0"}), 400
+
         return jsonify(simulate(graph, t0, t1, dt))
 
     except BadRequest as e:
@@ -509,7 +530,7 @@ from flask import send_from_directory
 
 @app.route("/")
 def index():
-    return send_from_directory(".", "index.html")
+    return send_from_directory(app.root_path, "index.html")
 
 if __name__ == "__main__":
     app.run(debug=True)

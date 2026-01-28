@@ -6,8 +6,8 @@
   <title>Simulink-lite (Plain HTML) - JointJS</title>
 
   <!-- JointJS (UMD, no build step) -->
-  <link rel="stylesheet" href="/static/joint.css">
-  <script src="/static/joint.js"></script>
+  <link rel="stylesheet" href="/static/joint.min.css">
+  <script src="/static/joint.min.js"></script>
 
   <!-- Plotly (kept as in your Drawflow version) -->
   <script src="/static/plotly-3.3.0.min.js"></script>
@@ -118,6 +118,25 @@
     fill: none !important;
 }
 
+
+/* === Selected block highlight (backup CSS if needed) === */
+.joint-cell.selected-block rect,
+.joint-cell.selected-block .body {
+  stroke: #8b5cf6 !important;
+  stroke-width: 3 !important;
+  fill: #f5f3ff !important;
+}
+
+
+/* === Box selection rectangle === */
+#paperWrap .box-select-rect{
+  position:absolute;
+  border:1px dashed #8b5cf6;
+  background: rgba(139, 92, 246, 0.10);
+  pointer-events:none;
+  z-index: 10000;
+}
+
 </style>
 </head>
 <body>
@@ -146,6 +165,14 @@
         <div class="toolbar">
           <button class="blockbtn" onclick="addBlock('TransferFunction')">+ Transfer Function</button>
           <button class="blockbtn" onclick="addBlock('Integrator')">+ Integrator</button>
+        </div>
+      </details>
+
+
+      <details class="cat">
+        <summary>Discontinuities</summary>
+        <div class="toolbar">
+          <button class="blockbtn" onclick="addBlock('Saturation')">+ Saturation</button>
         </div>
       </details>
 
@@ -302,6 +329,8 @@ window.addEventListener('DOMContentLoaded', () => {
 
   // Store last simulation response for Plot double-click
   let __lastSim = null;
+  let __lastSimSig = null; // signature of graph used for __lastSim
+
 
   window.onerror = function(msg, url, line, col, err) {
     setStatus('JS ERROR: ' + msg + ' (line ' + line + ')');
@@ -320,6 +349,7 @@ window.addEventListener('DOMContentLoaded', () => {
     Gain:       { inputs: ['u'], outputs: ['y'], defaultParams: { k: 1.0 }, desc: 'multiply input' },
     Sum:        { inputs: ['u1','u2'], outputs: ['y'], defaultParams: { signs: '++' }, desc: 'sum inputs' },
     Integrator: { inputs: ['u'], outputs: ['y'], defaultParams: { x0: 0.0 }, desc: '∫ u dt' },
+    Saturation: { inputs: ['u'], outputs: ['y'], defaultParams: { lower: -1.0, upper: 1.0 }, desc: 'limit signal to [lower, upper]' },
     Plot:       { inputs: ['u'], outputs: [], defaultParams: { label: '' }, desc: 'signal scope' },
     TransferFunction: { inputs: ['u'], outputs: ['y'], defaultParams: { num: '1', den: '1,1' }, desc: 'continuous LTI system' },
   };
@@ -331,6 +361,7 @@ window.addEventListener('DOMContentLoaded', () => {
     Integrator: 'Int',
     Gain: 'Gain',
     Sum: 'Sum',
+    Saturation: 'Sat',
     Plot: 'Plot'
   };
   function shortTypeName(type) { return SHORT_NAMES[type] || type; }
@@ -339,9 +370,111 @@ window.addEventListener('DOMContentLoaded', () => {
   const namespace = joint.shapes;
   const graph = new joint.dia.Graph({}, { cellNamespace: namespace });
 
+  // ===== Undo/Redo (CTRL+Z / CTRL+Y, multiple steps) =====
+  const __UNDO_MAX = 80;
+  let __undoStack = [];
+  let __redoStack = [];
+  let __histLock = false;      // prevents recording during restore
+  let __histTimer = null;
+
+  function __pushUndoSnapshot() {
+    if (__histLock) return;
+    try {
+      const snap = graph.toJSON();
+      const last = __undoStack.length ? __undoStack[__undoStack.length - 1] : null;
+      const s1 = JSON.stringify(snap);
+      const s0 = last ? JSON.stringify(last) : null;
+      if (s0 === s1) return; // avoid duplicates
+      __undoStack.push(snap);
+      if (__undoStack.length > __UNDO_MAX) __undoStack.shift();
+      // any new change invalidates redo stack
+      __redoStack = [];
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  function __scheduleSnapshot() {
+    if (__histLock) return;
+    if (__histTimer) clearTimeout(__histTimer);
+    __histTimer = setTimeout(() => {
+      __histTimer = null;
+      __pushUndoSnapshot();
+    }, 220);
+  }
+
+  function __restoreSnapshot(snap) {
+    if (!snap) return;
+    __histLock = true;
+    try {
+      // Restore full graph (cells + links)
+      graph.fromJSON(snap);
+
+      // Clear selection states (views will be recreated)
+      try {
+        selectedNodeId = null;
+        selectedNodeIds = new Set();
+        clearBlockSelection();
+        renderParamEditor();
+      } catch(e) {}
+
+      try { setSelectedLink(null); } catch(e) {}
+      try { refreshAllPlotNodeLabels(); } catch(e) {}
+    } finally {
+      __histLock = false;
+    }
+  }
+
+  function undo() {
+    if (__histLock) return;
+    if (__undoStack.length <= 1) return; // keep at least one (current) snapshot
+    const current = __undoStack.pop();
+    __redoStack.push(current);
+    const prev = __undoStack[__undoStack.length - 1];
+    __restoreSnapshot(prev);
+  }
+
+  function redo() {
+    if (__histLock) return;
+    if (!__redoStack.length) return;
+    const next = __redoStack.pop();
+    __undoStack.push(next);
+    __restoreSnapshot(next);
+  }
+
+  // Record history on *any* graph structural or attribute change (debounced)
+  graph.on('add remove change', (cell, opt = {}) => {
+    if (opt && opt.skipHistory) return;
+    __scheduleSnapshot();
+  });
+
+  // Keyboard bindings
+  document.addEventListener('keydown', (e) => {
+    const tag = (e.target && e.target.tagName) ? e.target.tagName.toUpperCase() : '';
+    const isTyping = (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (e.target && e.target.isContentEditable));
+    if (isTyping) return;
+
+    const key = (e.key || '').toLowerCase();
+
+    // Ctrl+Z => Undo, Ctrl+Shift+Z or Ctrl+Y => Redo
+    if (e.ctrlKey && !e.altKey && key === 'z') {
+      e.preventDefault();
+      if (e.shiftKey) redo();
+      else undo();
+    } else if (e.ctrlKey && !e.altKey && key === 'y') {
+      e.preventDefault();
+      redo();
+    }
+  }, true);
+
+  // Initialize with an initial snapshot (empty graph; will be updated after default model is added)
+  __pushUndoSnapshot();
+
+
+
   
 
-  // ===== Delete key: remove selected link or selected block (and its connected links) =====
+    // ===== Delete key: remove selected link or selected block(s) (and connected links) =====
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Delete' && e.key !== 'Backspace') return;
 
@@ -358,22 +491,66 @@ window.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // Delete selected node if any
-    if (typeof selectedNodeId !== 'undefined' && selectedNodeId) {
-      const el = graph.getCell(selectedNodeId);
-      if (el) {
-        // Remove all links connected to the element, then the element
-        const links = graph.getConnectedLinks(el);
-        links.forEach(link => link.remove());
-        el.remove();
-      }
-      selectedNodeId = null;
-      if (typeof renderParamEditor === 'function') renderParamEditor();
-      e.preventDefault();
-    }
+    // Delete selected nodes (multi-select supported)
+    const ids = (typeof selectedNodeIds !== 'undefined' && selectedNodeIds && selectedNodeIds.size)
+      ? Array.from(selectedNodeIds).map(String)
+      : (typeof selectedNodeId !== 'undefined' && selectedNodeId ? [String(selectedNodeId)] : []);
+
+    if (!ids.length) return;
+
+    // Remove connected links first, then nodes
+    ids.forEach(id => {
+      const el = graph.getCell(String(id));
+      if (!el) return;
+      const links = graph.getConnectedLinks(el);
+      links.forEach(link => link.remove());
+      el.remove();
+    });
+
+    // Clear selection
+    if (typeof selectedNodeId !== 'undefined') selectedNodeId = null;
+    if (typeof selectedNodeIds !== 'undefined') selectedNodeIds = new Set();
+    try { clearBlockSelection(); } catch(e) {}
+    try { renderParamEditor(); } catch(e) {}
+    try { refreshAllPlotNodeLabels(); } catch(e) {}
+
+    e.preventDefault();
   }, true);
 const wrap = document.getElementById('paperWrap');
-  const paper = new joint.dia.Paper({
+  
+  // ===== Connection validation (Simulink-style) =====
+  function __getPortGroup(m) {
+    if (!m) return null;
+    return m.getAttribute('port-group') ||
+           (m.closest && (m.closest('[port-group]') && m.closest('[port-group]').getAttribute('port-group'))) ||
+           (m.closest && (m.closest('.joint-port') && m.closest('.joint-port').getAttribute('port-group'))) ||
+           null;
+  }
+const paper = new joint.dia.Paper({
+    // Only allow starting a wire from OUT ports (ports have port-group="out")
+    validateMagnet: function(cellView, magnet) {
+      return __getPortGroup(magnet) === 'out';
+    },
+
+    // Enforce OUT → IN and forbid connecting to blocks without any IN ports.
+    validateConnection: function(srcView, srcMagnet, tgtView, tgtMagnet) {
+      // If no target magnet, connection is invalid (dropping on element body / blank)
+      if (!tgtMagnet || !tgtView || !tgtView.model) return false;
+
+      // Must be from OUT port
+      if (__getPortGroup(srcMagnet) !== 'out') return false;
+
+      // Must be to IN port
+      if (__getPortGroup(tgtMagnet) !== 'in') return false;
+
+      // Target element must have at least one input port group 'in'
+      const ports = (tgtView.model.getPorts) ? tgtView.model.getPorts() : [];
+      const hasInput = ports.some(p => p.group === 'in');
+      if (!hasInput) return false;
+
+      return true;
+    },
+
     el: wrap,
     model: graph,
     gridSize: 20,
@@ -390,30 +567,8 @@ const wrap = document.getElementById('paperWrap');
           targetMarker: { type: 'path', d: 'M 10 -5 0 0 10 5 z' }
         }
       });
-      
-  // ===== UX: Pan the whole diagram by dragging on blank space =====
-  // Dragging on empty canvas will translate the paper (does not affect element dragging).
-  let __panning = false;
-  let __panStartClient = { x: 0, y: 0 };
-  let __panStartTranslate = { x: 0, y: 0 };
 
-  paper.on('blank:pointerdown', (evt) => {
-    __panning = true;
-    __panStartClient = { x: evt.clientX, y: evt.clientY };
-    const t = paper.translate();
-    __panStartTranslate = { x: t.tx || 0, y: t.ty || 0 };
-    evt.preventDefault();
-  });
-
-  paper.on('blank:pointermove', (evt) => {
-    if (!__panning) return;
-    const dx = evt.clientX - __panStartClient.x;
-    const dy = evt.clientY - __panStartClient.y;
-    paper.translate(__panStartTranslate.x + dx, __panStartTranslate.y + dy);
-  });
-
-  paper.on('blank:pointerup', () => { __panning = false; });
-l.router('manhattan', { step: 20, padding: 12 });
+  l.router('manhattan', { step: 20, padding: 12 });
       l.connector('rounded', { radius: 8 });
       return l;
     },
@@ -426,6 +581,172 @@ l.router('manhattan', { step: 20, padding: 12 });
     snapLinks: { radius: 30 },
     markAvailable: true
   });
+
+  // ===== Viewport interactions (zoom/pan/box-select) =====
+  // (Moved out of defaultLink() to avoid registering listeners repeatedly.)
+// ===== Diagram zoom (paper scale) with CTRL + mouse wheel =====
+    // Zooms the JointJS paper only (not the whole page). Keeps the point under cursor stable.
+    let __paperScale = { x: 1, y: 1 };
+    const __ZOOM_MIN = 0.35;
+    const __ZOOM_MAX = 2.5;
+    const __ZOOM_STEP = 1.12; // per wheel notch
+  
+    function __clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
+  
+    function __setPaperScaleAroundClientPoint(newS, clientPt) {
+      // Keep cursor position stable: adjust translate based on local point before/after scaling.
+      const before = paper.clientToLocalPoint(clientPt);
+  
+      paper.scale(newS, newS);
+      __paperScale = { x: newS, y: newS };
+  
+      const after = paper.clientToLocalPoint(clientPt);
+  
+      const dx = (after.x - before.x) * newS;
+      const dy = (after.y - before.y) * newS;
+  
+      const t = paper.translate();
+      paper.translate((t.tx || 0) + dx, (t.ty || 0) + dy);
+    }
+  
+    wrap.addEventListener('wheel', (e) => {
+      if (!e.ctrlKey) return;              // only CTRL + wheel
+      e.preventDefault();                  // prevent browser zoom
+      e.stopPropagation();
+  
+      const dir = (e.deltaY < 0) ? 1 : -1; // wheel up => zoom in
+      const factor = (dir > 0) ? __ZOOM_STEP : (1 / __ZOOM_STEP);
+      const next = __clamp(__paperScale.x * factor, __ZOOM_MIN, __ZOOM_MAX);
+  
+      __setPaperScaleAroundClientPoint(next, { x: e.clientX, y: e.clientY });
+    }, { passive: false });
+  
+  
+        
+  
+    // ===== UX: Pan the whole diagram with RIGHT mouse button (DOM-based, reliable) =====
+    // Right-drag on empty canvas pans the paper. Left button stays for selection/move.
+    let __panning = false;
+    let __panStartClient = { x: 0, y: 0 };
+    let __panStartTranslate = { x: 0, y: 0 };
+  
+    // Disable browser context menu on canvas so RMB drag works everywhere
+    wrap.addEventListener('contextmenu', (e) => e.preventDefault());
+  
+    function __isInteractiveTarget(t) {
+      // If user right-clicks a block/link/port, don't pan (avoid conflicts)
+      return !!(t && (t.closest('.joint-element') || t.closest('.joint-link') || t.closest('.joint-port')));
+    }
+  
+    wrap.addEventListener('mousedown', (e) => {
+      if (e.button !== 2) return;                // 2 = right mouse button
+      if (__isInteractiveTarget(e.target)) return;
+  
+      __panning = true;
+      __panStartClient = { x: e.clientX, y: e.clientY };
+      const tr = paper.translate();
+      __panStartTranslate = { x: tr.tx || 0, y: tr.ty || 0 };
+  
+      e.preventDefault();
+      e.stopPropagation();
+    }, true);
+  
+    window.addEventListener('mousemove', (e) => {
+      if (!__panning) return;
+      const dx = e.clientX - __panStartClient.x;
+      const dy = e.clientY - __panStartClient.y;
+      paper.translate(__panStartTranslate.x + dx, __panStartTranslate.y + dy);
+      e.preventDefault();
+    }, true);
+  
+    window.addEventListener('mouseup', (e) => {
+      if (e.button !== 2) return;
+      __panning = false;
+    }, true);
+  
+    
+    // ===== LMB drag: box selection of multiple blocks (marquee) =====
+    // Drag on empty canvas (left button) draws a rectangle and selects intersecting blocks.
+    let __boxSel = null; // { startClient:{x,y}, rectEl }
+    function __clientRectToLocalRect(c0, c1) {
+      const p0 = paper.clientToLocalPoint(c0);
+      const p1 = paper.clientToLocalPoint(c1);
+      const x1 = Math.min(p0.x, p1.x), y1 = Math.min(p0.y, p1.y);
+      const x2 = Math.max(p0.x, p1.x), y2 = Math.max(p0.y, p1.y);
+      return { x: x1, y: y1, width: (x2 - x1), height: (y2 - y1) };
+    }
+    function __rectsIntersect(a, b) {
+      return !(a.x + a.width < b.x || b.x + b.width < a.x || a.y + a.height < b.y || b.y + b.height < a.y);
+    }
+    function __isBlankTarget(t) {
+      // Only start box selection when clicking on empty background, not on elements/links/ports.
+      return !(t && (t.closest('.joint-element') || t.closest('.joint-link') || t.closest('.joint-port')));
+    }
+  
+    wrap.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return; // left only
+      if (!__isBlankTarget(e.target)) return;
+  
+      __boxSel = { startClient: { x: e.clientX, y: e.clientY }, rectEl: null };
+  
+      const r = document.createElement('div');
+      r.className = 'box-select-rect';
+      r.style.left = '0px';
+      r.style.top = '0px';
+      r.style.width = '0px';
+      r.style.height = '0px';
+      wrap.appendChild(r);
+      __boxSel.rectEl = r;
+  
+      // Clear selection at start of box select
+      selectedNodeId = null;
+      selectedNodeIds = new Set();
+      clearBlockSelection();
+      renderParamEditor();
+  
+      e.preventDefault();
+    }, true);
+  
+    window.addEventListener('mousemove', (e) => {
+      if (!__boxSel) return;
+      const x0 = __boxSel.startClient.x, y0 = __boxSel.startClient.y;
+      const x1 = e.clientX, y1 = e.clientY;
+  
+      const left = Math.min(x0, x1), top = Math.min(y0, y1);
+      const w = Math.abs(x1 - x0), h = Math.abs(y1 - y0);
+  
+      if (__boxSel.rectEl) {
+        const wrapRect = wrap.getBoundingClientRect();
+        __boxSel.rectEl.style.left = (left - wrapRect.left) + 'px';
+        __boxSel.rectEl.style.top = (top - wrapRect.top) + 'px';
+        __boxSel.rectEl.style.width = w + 'px';
+        __boxSel.rectEl.style.height = h + 'px';
+      }
+    }, true);
+  
+    window.addEventListener('mouseup', (e) => {
+      if (!__boxSel) return;
+  
+      const c0 = __boxSel.startClient;
+      const c1 = { x: e.clientX, y: e.clientY };
+      const selLocal = __clientRectToLocalRect(c0, c1);
+  
+      const hits = [];
+      graph.getElements().forEach(el => {
+        const bb = el.getBBox(); // paper local coords
+        const r = { x: bb.x, y: bb.y, width: bb.width, height: bb.height };
+        if (__rectsIntersect(selLocal, r)) hits.push(String(el.id));
+      });
+  
+      selectedNodeIds = new Set(hits);
+      selectedNodeId = (hits.length === 1) ? hits[0] : null;
+      setSelectedBlocks(selectedNodeIds);
+      renderParamEditor();
+  
+      if (__boxSel.rectEl && __boxSel.rectEl.parentNode) __boxSel.rectEl.parentNode.removeChild(__boxSel.rectEl);
+      __boxSel = null;
+    }, true);
+
   // === Port positioning: tangent to block edge (circle edge touches the block edge) ===
   // We keep the visual port radius = 7, but shift the port CENTER inward by 7px.
   const PORT_RADIUS = 7;     // must match portBody r
@@ -526,6 +847,11 @@ l.router('manhattan', { step: 20, padding: 12 });
     if (type === 'Gain')       return `k=${(params && params.k !== undefined) ? params.k : defaults.k}`;
     if (type === 'Sum')        return `signs=${(params && params.signs !== undefined) ? params.signs : defaults.signs}`;
     if (type === 'Integrator') return `x0=${(params && params.x0 !== undefined) ? params.x0 : defaults.x0}`;
+    if (type === 'Saturation') {
+      const lo = (params && params.lower !== undefined) ? params.lower : defaults.lower;
+      const hi = (params && params.upper !== undefined) ? params.upper : defaults.upper;
+      return `lower=${lo}, upper=${hi}`;
+    }
     if (type === 'TransferFunction') {
       const num = (params && params.num !== undefined) ? params.num : defaults.num;
       const den = (params && params.den !== undefined) ? params.den : defaults.den;
@@ -578,6 +904,71 @@ l.router('manhattan', { step: 20, padding: 12 });
   let nextId = 1;
   function allocId() { return String(nextId++); }
 
+  
+
+// ===== Keep block text upright (do not rotate label with the element) =====
+function updateLabelUpright(el) {
+  if (!el || el.isLink && el.isLink()) return;
+  const a = (typeof el.angle === 'function') ? (el.angle() || 0) : 0;
+  const sz = (typeof el.size === 'function') ? el.size() : { width: 0, height: 0 };
+  // Label is centered inside the element by default; rotate around element center in local coords
+  const cx = (sz.width || 0) / 2;
+  const cy = (sz.height || 0) / 2;
+  if (!a) {
+    el.attr('label/transform', null);
+  } else {
+    el.attr('label/transform', `rotate(${-a}, ${cx}, ${cy})`);
+  }
+}
+
+// ===== Auto-swap element size for 90°/270° so the (upright) label stays inside =====
+function ensureSizeMatchesAngle(el) {
+  if (!el || (el.isLink && el.isLink())) return;
+  if (el.get && el.get('__swappingSize')) return;
+
+  const a = (typeof el.angle === 'function') ? (el.angle() || 0) : 0;
+  const ang = (((a % 360) + 360) % 360);
+  const base = (el.get && el.get('baseSize')) ? el.get('baseSize') : (typeof el.size === 'function' ? el.size() : { width: 0, height: 0 });
+
+  const wantSwap = (ang === 90 || ang === 270);
+  const target = wantSwap ? { width: base.height, height: base.width } : { width: base.width, height: base.height };
+
+  const cur = (typeof el.size === 'function') ? el.size() : { width: 0, height: 0 };
+  if (cur.width === target.width && cur.height === target.height) return;
+
+  // Guard against resize->change:size loops
+  if (el.set) el.set('__swappingSize', true, { silent: true });
+  if (typeof el.resize === 'function') el.resize(target.width, target.height);
+  if (el.unset) el.unset('__swappingSize', { silent: true });
+}
+
+// Track "baseSize" as the unrotated size (0°/180°). If resized while rotated,
+// we still keep baseSize in unrotated orientation so swapping stays consistent.
+function updateBaseSize(el) {
+  if (!el || (el.isLink && el.isLink())) return;
+  if (el.get && el.get('__swappingSize')) return;
+
+  const a = (typeof el.angle === 'function') ? (el.angle() || 0) : 0;
+  const ang = (((a % 360) + 360) % 360);
+  const sz = (typeof el.size === 'function') ? el.size() : { width: 0, height: 0 };
+  const base = (ang === 90 || ang === 270) ? { width: sz.height, height: sz.width } : { width: sz.width, height: sz.height };
+  if (el.set) el.set('baseSize', base, { silent: true });
+}
+
+// Keep label upright & size consistent whenever the element rotates or resizes.
+graph.on('change:angle', (cell) => {
+  if (!cell || cell.isLink && cell.isLink()) return;
+  ensureSizeMatchesAngle(cell);
+  updateLabelUpright(cell);
+});
+graph.on('change:size', (cell) => {
+  if (!cell || cell.isLink && cell.isLink()) return;
+  updateBaseSize(cell);
+  updateLabelUpright(cell);
+});
+
+// Keep label upright whenever the element rotates (or is resized).
+
   function createBlockCell(type, x, y, params, forcedId) {
     const spec = BLOCK_LIBRARY[type];
     if (!spec) throw new Error('Unknown type: ' + type);
@@ -593,15 +984,18 @@ l.router('manhattan', { step: 20, padding: 12 });
 
     el.position(x, y);
     el.resize(170, 76);
+    el.set('baseSize', { width: 170, height: 76 }, { silent: true });
 
     el.attr({
       body: {
+        magnet: false,
         rx: 10, ry: 10,
         stroke: '#b8c0cc',
         strokeWidth: 1.2,
-        fill: '#ffffff'
+        fill: '#ffd1c8'
       },
       label: {
+        magnet: false,
         text: blockText(type, id, p),
         fill: '#111',
         fontSize: 12,
@@ -617,6 +1011,7 @@ l.router('manhattan', { step: 20, padding: 12 });
     el.addPorts([...inPorts, ...outPorts]);
 
     el.addTo(graph);
+    updateLabelUpright(el);
     return el;
   }
 
@@ -630,6 +1025,41 @@ l.router('manhattan', { step: 20, padding: 12 });
 
   // ===== Selection + param editor =====
   let selectedNodeId = null;
+  let selectedNodeIds = new Set();
+
+  // --- Visual highlight for selected block (reliable via model attrs) ---
+  const __SEL_STYLE = { stroke: '#8b5cf6', strokeWidth: 3, fill: '#f5f3ff' };
+
+  function __applySelectionStyle(el, on) {
+    if (!el || (el.isLink && el.isLink())) return;
+    // Cache original style once
+    const cached = el.get('__origBodyStyle');
+    if (!cached) {
+      const a = (el.attr('body') || {});
+      el.set('__origBodyStyle', {
+        stroke: a.stroke ?? '#b8c0cc',
+        strokeWidth: a.strokeWidth ?? 1.2,
+        fill: a.fill ?? '#ffd1c8'
+      }, { silent: true });
+    }
+    const orig = el.get('__origBodyStyle') || { stroke:'#b8c0cc', strokeWidth:1.2, fill:'#ffd1c8' };
+    el.attr('body/stroke', on ? __SEL_STYLE.stroke : orig.stroke);
+    el.attr('body/strokeWidth', on ? __SEL_STYLE.strokeWidth : orig.strokeWidth);
+    el.attr('body/fill', on ? __SEL_STYLE.fill : orig.fill);
+  }
+
+  function clearBlockSelection() {
+    graph.getElements().forEach(el => __applySelectionStyle(el, false));
+  }
+
+  function setSelectedBlocks(ids) {
+    clearBlockSelection();
+    (ids || []).forEach(id => {
+      const el = graph.getCell(String(id));
+      if (el) __applySelectionStyle(el, true);
+    });
+  }
+
 
   function renderParamEditor() {
     const info = document.getElementById('selectedInfo');
@@ -640,6 +1070,14 @@ l.router('manhattan', { step: 20, padding: 12 });
       info.textContent = 'Nothing selected.';
       return;
     }
+    // Multi-select: show summary and skip param editor
+    if (selectedNodeIds && selectedNodeIds.size > 1) {
+      const ids = Array.from(selectedNodeIds).map(String).sort((a,b)=>parseInt(a,10)-parseInt(b,10));
+      info.innerHTML = `<div><b>${ids.length} blocks selected</b><br>` + ids.map(id => ('#' + id)).join(', ') + `</div>`;
+      pe.innerHTML = `<div class="hint">Vícenásobný výběr: editace parametrů je vypnutá. Klikni na jeden blok pro editaci.</div>`;
+      return;
+    }
+
 
     const node = graph.getCell(String(selectedNodeId));
     if (!node) {
@@ -707,13 +1145,21 @@ l.router('manhattan', { step: 20, padding: 12 });
     });
   }
 
-  // Click-to-select
-  paper.on('element:pointerdown', (elementView) => {
+  // Click-to-select (single click selects exactly one block)
+  paper.on('element:pointerdown', (elementView, evt) => {
+    if (evt && evt.stopPropagation) evt.stopPropagation();
     selectedNodeId = String(elementView.model.id);
+    selectedNodeIds = new Set([selectedNodeId]);
+    setSelectedBlocks(selectedNodeIds);
     renderParamEditor();
   });
-  paper.on('blank:pointerclick', () => {
+
+  // Left click on blank clears selection (box-select uses DOM handlers below)
+  paper.on('blank:pointerdown', (evt) => {
+    if (evt && evt.button === 2) return; // RMB reserved for panning
     selectedNodeId = null;
+    selectedNodeIds = new Set();
+    clearBlockSelection();
     renderParamEditor();
   });
 
@@ -732,6 +1178,7 @@ l.router('manhattan', { step: 20, padding: 12 });
       if (!el) return;
       const cur = el.angle() || 0;
       el.rotate(getAngleSnap(cur + 90), true);
+      updateLabelUpright(el);
       // link reroute
       graph.getConnectedLinks(el).forEach(l => l.router('manhattan', { step: 20, padding: 12 }));
     }
@@ -882,9 +1329,9 @@ l.router('manhattan', { step: 20, padding: 12 });
   }
 
   paper.on('link:pointerdown', (linkView) => {
+    if (__wireDrag) return; // don't fight with segment-drag handler
     setSelectedLink(linkView.model);
-  });
-  paper.on('blank:pointerclick', () => {
+  });paper.on('blank:pointerclick', () => {
     setSelectedLink(null);
     clearHover();
   });
@@ -908,25 +1355,6 @@ l.router('manhattan', { step: 20, padding: 12 });
     if (filtered.length) highlightLinks(filtered);
   });
   paper.on('element:mouseleave', () => clearHover());
-
-  // Delete selected link with Delete/Backspace
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Delete' || e.key === 'Backspace') {
-      const tag = (e.target && e.target.tagName) ? e.target.tagName.toUpperCase() : '';
-      const isTyping = (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (e.target && e.target.isContentEditable));
-      if (isTyping) return;
-      if (selectedLinkId) {
-        const l = graph.getCell(String(selectedLinkId));
-        if (l && l.isLink()) {
-          l.remove();
-          selectedLinkId = null;
-          clearHover();
-          refreshAllPlotNodeLabels();
-        }
-      }
-    }
-  });
-
   // ===== Public API: addBlock/save/load/exportGraph/simulate =====
   window.addBlock = function addBlock(type) {
     const spec = BLOCK_LIBRARY[type];
@@ -976,6 +1404,9 @@ l.router('manhattan', { step: 20, padding: 12 });
       try {
         const scheme = JSON.parse(reader.result);
         graph.clear();
+        selectedNodeId = null;
+        selectedNodeIds = new Set();
+        try { clearBlockSelection(); } catch(e) {}
 
         nextId = Math.max(1, parseInt(scheme.nextId || '1', 10));
 
@@ -985,6 +1416,7 @@ l.router('manhattan', { step: 20, padding: 12 });
           const el = createBlockCell(e.type, e.x || 50, e.y || 50, e.params || {}, e.id);
           idSet.add(String(el.id));
           if (typeof e.angle === 'number') el.rotate(getAngleSnap(e.angle), true);
+          updateLabelUpright(el);
         });
 
         // links
@@ -1004,6 +1436,10 @@ l.router('manhattan', { step: 20, padding: 12 });
 
         refreshAllPlotNodeLabels();
         renderParamEditor();
+
+        // history: snapshot after load
+        try { __pushUndoSnapshot(); } catch(e) {}
+
       } catch (e) {
         alert('Nelze načíst schéma: ' + e);
       }
@@ -1080,6 +1516,17 @@ l.router('manhattan', { step: 20, padding: 12 });
     document.getElementById('jsonOut').textContent = JSON.stringify(graphOut, null, 2);
     return graphOut;
   };
+  // Compute a stable signature of the current graph relevant for simulation results.
+  function __graphSignature() {
+    try {
+      const g = window.exportGraph();
+      // Avoid huge signature differences due to ordering: exportGraph already emits deterministic arrays in creation order.
+      return JSON.stringify(g);
+    } catch (e) {
+      return null;
+    }
+  }
+
 
   // Map server log keys (e.g., "2.y" or "2(TransferFunction).y") to a clear, human-friendly label like "TF (2).y"
   function prettyLabelForLogKey(k) {
@@ -1139,6 +1586,7 @@ l.router('manhattan', { step: 20, padding: 12 });
       try {
         data = JSON.parse(raw);
         __lastSim = data;
+        __lastSimSig = __graphSignature();
       } catch(e) {
         document.getElementById('out').textContent = 'OK response but not JSON:\n' + raw;
         return;
@@ -1178,7 +1626,9 @@ l.router('manhattan', { step: 20, padding: 12 });
     const titleEl = document.getElementById('plotTitle');
     if (titleEl) titleEl.textContent = label;
 
-    if (!__lastSim || !__lastSim.t || !__lastSim.logs) {
+    // If we have no simulation yet OR the graph has changed since last simulation, re-run simulate first.
+    const curSig = __graphSignature();
+    if (!__lastSim || !__lastSim.t || !__lastSim.logs || !__lastSimSig || (curSig && __lastSimSig !== curSig)) {
       try { toggleOutput(true); } catch(e) {}
       window.simulate().then(() => setTimeout(() => openPlotForPlotNode(plotNodeId), 0));
       return;
@@ -1193,6 +1643,7 @@ l.router('manhattan', { step: 20, padding: 12 });
 
     let key = keys[0];
     let pretty = '';
+    let foundKey = false;
 
     if (link) {
       const src = link.get('source') || {};
@@ -1210,13 +1661,21 @@ l.router('manhattan', { step: 20, padding: 12 });
         `${srcId}:${port}`,
       ];
       for (const cand of candidates) {
-        if (Object.prototype.hasOwnProperty.call(__lastSim.logs, cand)) { key = cand; break; }
+        if (Object.prototype.hasOwnProperty.call(__lastSim.logs, cand)) { key = cand; foundKey = true; break; }
       }
 
       const re1 = new RegExp(`^${srcId}\\([^)]*\\)\\.${port}$`);
-      for (const k of keys) if (re1.test(k)) { key = k; break; }
+      for (const k of keys) if (re1.test(k)) { key = k; foundKey = true; break; }
 
       pretty = `${shortTypeName(srcType)} (${srcId}).${port}`;
+    }
+
+    // If this Plot was added/rewired after the last simulation, its signal might not exist in logs yet.
+    // In that case, re-run simulate and reopen instead of showing a wrong (default) trace.
+    if (link && !foundKey) {
+      try { toggleOutput(true); } catch(e) {}
+      window.simulate().then(() => setTimeout(() => openPlotForPlotNode(plotNodeId), 0));
+      return;
     }
 
     const metaEl = document.getElementById('plotMeta');
@@ -1241,32 +1700,65 @@ l.router('manhattan', { step: 20, padding: 12 });
     if (el && el.get('blockType') === 'Plot') openPlotForPlotNode(String(el.id));
   });
 
-  // ===== Auto-create a default model on load (Const -> TF -> Plot) =====
+  // ===== Auto-load default model on load (from default_scheme.json) =====
+(async () => {
   try {
-    const idConst = createBlockCell('Constant', 100, 140, { value: 1.0 }).id;
-    const idTF    = createBlockCell('TransferFunction', 380, 140, { num: '1', den: '1,1' }).id;
-    const idPlot  = createBlockCell('Plot', 660, 140, { label: '' }).id;
+    // Uprav si cestu podle toho, kde soubor ve Flasku opravdu servíruješ.
+    // Typicky: /static/default_scheme.json
+    const res = await fetch('/static/default_scheme.json', { cache: 'no-store' });
+    if (!res.ok) throw new Error(`Failed to load default_scheme.json (${res.status})`);
 
-    const l1 = paper.options.defaultLink();
-    l1.source({ id: String(idConst), port: 'y' });
-    l1.target({ id: String(idTF), port: 'u' });
-    l1.addTo(graph);
+    const scheme = await res.json();
 
-    const l2 = paper.options.defaultLink();
-    l2.source({ id: String(idTF), port: 'y' });
-    l2.target({ id: String(idPlot), port: 'u' });
-    l2.addTo(graph);
+    // 1) Vytvoř bloky a udělej mapování původníID -> nováID
+    const idMap = new Map();
+
+    for (const el of (scheme.elements || [])) {
+      const cell = createBlockCell(el.type, el.x, el.y, el.params || {});
+      idMap.set(String(el.id), String(cell.id));
+
+      // pokud podporuješ rotaci:
+      if (typeof el.angle === 'number' && cell && typeof cell.rotate === 'function') {
+        cell.rotate(getAngleSnap(el.angle), true);
+      } else if (typeof el.angle === 'number' && cell) {
+        // fallback: některé implementace mají přímo atribut angle
+        try { cell.set('angle', el.angle); } catch (e) {}
+      }
+    }
+
+    // 2) Vytvoř linky (ignorujeme magnety, důležité jsou id+port)
+    for (const ln of (scheme.links || [])) {
+      const srcOld = String(ln.source?.id ?? '');
+      const tgtOld = String(ln.target?.id ?? '');
+      const srcId  = idMap.get(srcOld);
+      const tgtId  = idMap.get(tgtOld);
+
+      if (!srcId || !tgtId) {
+        console.warn('Skipping link (missing mapped ids):', ln);
+        continue;
+      }
+
+      const link = paper.options.defaultLink();
+      link.source({ id: srcId, port: ln.source.port });
+      link.target({ id: tgtId, port: ln.target.port });
+      link.addTo(graph);
+    }
 
     refreshAllPlotNodeLabels();
-    setStatus('Default model added: Constant → Transfer Function → Plot');
+    setStatus('Default scheme loaded: default_scheme.json');
 
-  } catch(e) {
-    setStatus('JS ERROR while auto-adding model: ' + e);
+    // history: snapshot after default model creation
+    try { __pushUndoSnapshot(); } catch (e) {}
+
+  } catch (e) {
+    setStatus('JS ERROR while auto-loading default scheme: ' + e);
     console.error(e);
   }
 
   setStatus('Editor started.');
+})();
 });
+
 </script>
 </body>
 </html>
