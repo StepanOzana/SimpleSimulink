@@ -265,6 +265,10 @@
       box-sizing:border-box;
     }
 
+    /* === Block settings icon (top-left) === */
+    .joint-settings-icon { cursor: pointer; }
+    .joint-settings-icon:hover { opacity: 0.85; }
+
 
     /* Python console opener */
     #openPyConsoleBtn{
@@ -343,6 +347,13 @@
       </details>
 
       <details class="cat">
+        <summary>Others</summary>
+        <div class="toolbar">
+          <button class="blockbtn" onclick="addBlock('Text')">+ Text</button>
+        </div>
+      </details>
+
+      <details class="cat">
         <summary>Sinks</summary>
         <div class="toolbar">
           <button class="blockbtn" onclick="addBlock('Plot')">+ Plot</button>
@@ -369,7 +380,7 @@
     </div>
 
     <div class="section-title">Nastavení bloků</div>
-    <div class="hint">Dvojklik na blok otevře okno s parametry.</div>
+    <div class="hint">Klikni na ⚙ ikonku v levém horním rohu bloku pro otevření parametrů.</div>
     <div id="selectedInfo" class="hint" style="display:none">Nothing selected.</div>
     <div id="paramEditor" style="display:none"></div>
 
@@ -438,6 +449,7 @@
   <div class="fp-header" id="plotHeader">
     <span id="plotTitle">Plot</span>
     <div class="fp-actions">
+      <button class="fp-btn" id="plotSettingsBtn" type="button" title="Nastavení bloku Plot">Settings</button>
       <button class="fp-btn" onclick="togglePlotWindow(false)">Close</button>
     </div>
   </div>
@@ -516,7 +528,14 @@ window.addEventListener('DOMContentLoaded', () => {
     const show = (typeof force === 'boolean') ? force : !w.classList.contains('show');
     w.classList.toggle('show', show);
     w.setAttribute('aria-hidden', show ? 'false' : 'true');
-    if (!show && typeof Plotly !== 'undefined') { try { Plotly.purge('plotCanvas'); } catch(e){} }
+    if (!show) {
+      __currentPlotNodeId = null;
+      try {
+        const btn = document.getElementById('plotSettingsBtn');
+        if (btn) btn.disabled = true;
+      } catch(e) {}
+      if (typeof Plotly !== 'undefined') { try { Plotly.purge('plotCanvas'); } catch(e){} }
+    }
   }
 
   window.toggleOutput = toggleOutput;
@@ -651,6 +670,7 @@ document.addEventListener('keydown', (e) => {
   // Store last simulation response for Plot double-click
   let __lastSim = null;
   let __lastSimSig = null; // signature of graph used for __lastSim
+  let __currentPlotNodeId = null; // currently shown Plot block id in the Plot window
 
 
   window.onerror = function(msg, url, line, col, err) {
@@ -693,6 +713,9 @@ document.addEventListener('keydown', (e) => {
 
   // Display sink: shows last simulated value of its input
   Display:    { inputs: ['u'], outputs: [], defaultParams: { label: '', fmt: '%.4g', value: '' }, desc: 'show value' },
+
+  // Annotation text (not part of simulation)
+  Text:       { inputs: [], outputs: [], defaultParams: { text: 'Text', fontSize: 16, bold: false, italic: false }, desc: 'canvas annotation' },
 
   TransferFunction: { inputs: ['u'], outputs: ['y'], defaultParams: { num: '1', den: '1,1' }, desc: 'continuous LTI system' },
 
@@ -748,14 +771,72 @@ document.addEventListener('keydown', (e) => {
   Sum: 'Sum',
   Saturation: 'Sat',
   Plot: 'Plot',
-  Display: 'Disp'
-  ,PythonSFunction: 'PyF'
+  Display: 'Disp',
+  Text: 'Text',
+  PythonSFunction: 'PyF'
 };
   function shortTypeName(type) { return SHORT_NAMES[type] || type; }
 
   // ===== JointJS graph + paper =====
   const namespace = joint.shapes;
   const graph = new joint.dia.Graph({}, { cellNamespace: namespace });
+
+  // ===== Custom block shape with a small settings icon (top-left) =====
+  // Clicking the icon opens the parameter modal (instead of using double-click).
+  // Keep it self-contained (no external assets). Styled as a circular "button".
+const GEAR_D = `M 34.268 90 c -0.669 0 -1.338 -0.132 -1.975 -0.395 l -9.845 -4.079 c -1.274 -0.527 -2.267 -1.519 -2.795 -2.795 c -0.528 -1.274 -0.528 -2.679 0 -3.953 c 1.216 -2.936 0.075 -5.558 -1.399 -7.032 c -1.474 -1.475 -4.094 -2.615 -7.033 -1.399 c -1.273 0.529 -2.677 0.528 -3.952 0.001 c -1.275 -0.528 -2.268 -1.52 -2.795 -2.795 l -4.078 -9.844 c -1.089 -2.63 0.164 -5.657 2.794 -6.748 C 6.128 49.745 7.174 47.085 7.174 45 c 0 -2.084 -1.046 -4.745 -3.983 -5.962 c -1.274 -0.528 -2.267 -1.52 -2.795 -2.795 c -0.528 -1.274 -0.528 -2.678 0 -3.952 l 4.078 -9.844 c 1.09 -2.631 4.12 -3.883 6.747 -2.795 c 2.936 1.216 5.558 0.075 7.033 -1.399 c 1.474 -1.474 2.616 -4.095 1.399 -7.032 c -1.09 -2.631 0.164 -5.657 2.795 -6.747 l 9.844 -4.077 c 1.274 -0.528 2.678 -0.528 3.953 0 c 1.275 0.528 2.268 1.521 2.795 2.796 c 1.216 2.936 3.877 3.982 5.962 3.982 c 2.085 0 4.745 -1.046 5.962 -3.983 c 1.09 -2.631 4.115 -3.885 6.748 -2.795 l 9.845 4.077 c 1.274 0.528 2.267 1.52 2.795 2.795 c 0.527 1.274 0.527 2.679 -0.001 3.953 c -1.217 2.936 -0.074 5.557 1.399 7.031 c 1.475 1.474 4.097 2.615 7.032 1.399 c 1.277 -0.528 2.68 -0.527 3.953 0 c 1.275 0.528 2.268 1.521 2.796 2.796 l 4.077 9.843 c 1.089 2.631 -0.165 5.658 -2.795 6.747 c -2.937 1.217 -3.983 3.878 -3.983 5.962 c 0 2.085 1.046 4.745 3.983 5.962 h 0.001 c 2.629 1.091 3.883 4.117 2.795 6.747 l -4.079 9.845 c -0.527 1.273 -1.52 2.266 -2.795 2.795 c -1.273 0.528 -2.679 0.528 -3.954 -0.001 c -2.934 -1.217 -5.557 -0.074 -7.031 1.399 c -1.474 1.475 -2.615 4.096 -1.399 7.032 c 0.528 1.274 0.528 2.678 0.001 3.953 c -0.528 1.275 -1.521 2.267 -2.796 2.796 l -9.844 4.077 c -2.63 1.09 -5.657 -0.166 -6.748 -2.794 c -1.217 -2.938 -3.877 -3.985 -5.962 -3.985 c -2.084 0 -4.746 1.047 -5.962 3.984 c -0.527 1.273 -1.52 2.266 -2.794 2.795 C 35.607 89.868 34.937 90 34.268 90 z M 25.491 80.293 l 8.349 3.459 c 2.105 -4.294 6.31 -6.926 11.161 -6.926 c 0 0 0 0 0 0 c 4.852 0 9.056 2.633 11.16 6.926 l 8.348 -3.459 c -1.547 -4.524 -0.435 -9.358 2.996 -12.788 c 3.431 -3.431 8.265 -4.544 12.789 -2.996 l 3.459 -8.348 c -4.294 -2.104 -6.926 -6.309 -6.926 -11.16 c 0 -4.852 2.632 -9.057 6.926 -11.162 l -3.459 -8.349 c -4.523 1.549 -9.359 0.435 -12.789 -2.994 c -3.432 -3.431 -4.543 -8.265 -2.996 -12.789 l -8.348 -3.458 c -2.103 4.293 -6.308 6.925 -11.16 6.925 c -4.852 0 -9.057 -2.632 -11.162 -6.925 l -8.349 3.458 c 1.548 4.524 0.436 9.358 -2.995 12.789 c -3.431 3.431 -8.264 4.544 -12.789 2.994 l -3.458 8.349 c 4.294 2.105 6.926 6.31 6.926 11.162 c 0 4.852 -2.632 9.056 -6.926 11.16 l 3.458 8.348 c 4.525 -1.547 9.359 -0.435 12.789 2.995 C 25.927 70.935 27.039 75.769 25.491 80.293 z M 84.511 56.503 c 0.001 0 0.002 0 0.003 0.001 C 84.513 56.503 84.512 56.503 84.511 56.503 z M 45.001 65.781 C 33.543 65.781 24.22 56.459 24.22 45 c 0 -11.459 9.323 -20.781 20.781 -20.781 S 65.783 33.541 65.783 45 C 65.783 56.459 56.46 65.781 45.001 65.781 z M 45.001 30.218 C 36.851 30.218 30.22 36.85 30.22 45 c 0 8.151 6.631 14.782 14.781 14.782 c 8.151 0 14.782 -6.631 14.782 -14.782 C 59.783 36.85 53.153 30.218 45.001 30.218 z`;
+
+//ikona settings v bloku
+const SettingsRect = joint.dia.Element.define('app.SettingsRect', {
+  attrs: {
+    body: {
+      rx: 7,
+      ry: 7,
+      refWidth: '100%',
+      refHeight: '100%'
+    },
+
+    label: {
+      refX: '50%',
+      refY: '50%',
+      textAnchor: 'middle',
+      yAlignment: 'middle',
+      textWrap: { width: -10, height: -10 }
+    },
+
+    settingsHitbox: {
+      x: 4,
+      y: 4,
+      width: 25,
+      height: 25,
+      fill: 'transparent',
+      stroke: 'transparent',
+      cursor: 'pointer',
+      'pointer-events': 'all'
+    },
+
+    settingsPath: {
+      d: GEAR_D,
+      //fill: '#eb2543',   //barva ikony settings v bloku, default červená
+	  fill: '#4D179A',   //barva ikony settings v bloku
+      transform: 'translate(5 5) scale(0.2)',    //translate(xxx yyy) určuje pozici ozubeného kolečka
+      'pointer-events': 'none'
+    }
+  }
+}, {
+  markup: [
+    { tagName: 'rect', selector: 'body' },
+    { tagName: 'text', selector: 'label' },
+    { tagName: 'rect', selector: 'settingsHitbox', attributes: { 'data-action': 'settings' } },
+    { tagName: 'path', selector: 'settingsPath' }
+  ]
+});
+
+// Register custom shape inside the namespace used by Graph/Paper so loading from JSON works.
+  try {
+    namespace.app = namespace.app || {};
+    namespace.app.SettingsRect = SettingsRect;
+  } catch(e) {}
 
   // ===== Undo/Redo (CTRL+Z / CTRL+Y, multiple steps) =====
   const __UNDO_MAX = 80;
@@ -956,7 +1037,7 @@ const paper = new joint.dia.Paper({
       const l = new joint.shapes.standard.Link();
       l.attr({
         line: {
-          stroke: '#4a90e2',
+          stroke: '#8B4513',  //barva spojů
           strokeWidth: 2.2,
           targetMarker: { type: 'path', d: 'M 10 -5 0 0 10 5 z' }
         }
@@ -1338,6 +1419,11 @@ function computeDisplaySignalPretty(displayId) {
 
 
   function blockText(type, id, params) {
+    // Text annotation: show only the user text, not the standard header lines.
+    if (type === 'Text') {
+      const t = (params && params.text !== undefined) ? String(params.text) : 'Text';
+      return t;
+    }
     const shown = shortTypeName(type);
     const title = `${shown} (${id})`;
     const desc = (BLOCK_LIBRARY[type] && typeof BLOCK_LIBRARY[type].desc === 'string') ? BLOCK_LIBRARY[type].desc : '';
@@ -1436,23 +1522,30 @@ graph.on('change:size',  (cell) => { if (cell && !cell.isLink()) updateLabelUpri
     if (type === 'Sum') p = __normalizeSumParams(p0);
     if (type === 'Plot') p = __normalizePlotParams(p0);
 
-    const el = new joint.shapes.standard.Rectangle({
+    const el = new SettingsRect({
       id,
       blockType: type,
       params: p
     });
 
     el.position(x, y);
-    el.resize(170, 76);
-    el.set('baseSize', { width: 170, height: 76 }, { silent: true });
+    // Default size; Text is wider/shorter.
+    if (type === 'Text') {
+      el.resize(120, 36);
+      el.set('baseSize', { width: 120, height: 36 }, { silent: true });
+    } else {
+      el.resize(170, 76);
+      el.set('baseSize', { width: 170, height: 76 }, { silent: true });
+    }
 
     el.attr({
       body: {
         magnet: false,
         rx: 10, ry: 10,
-        stroke: '#b8c0cc',
-        strokeWidth: 1.2,
-        fill: '#ffd1c8'
+        stroke: (type === 'Text') ? 'transparent' : '#BC8F8F',    //barva okraje bloků
+        strokeWidth: (type === 'Text') ? 0 : 1.2,
+        //fill: (type === 'Text') ? 'rgba(255,255,255,0.0)' : '#ffd1c8'      //barva výplně bloků, originál (losos)
+		fill: (type === 'Text') ? 'rgba(255,255,255,0.0)' : '#FAEBD7'      //barva výplně bloků
       },
       label: {
         magnet: false,
@@ -1463,6 +1556,14 @@ graph.on('change:size',  (cell) => { if (cell && !cell.isLink()) updateLabelUpri
         textWrap: { width: -10, height: -10 }
       }
     });
+
+    // Hide the settings icon on Text annotations (they are edited via their params, but the icon is noisy).
+    if (type === 'Text') {
+      try {
+        el.attr('settingsHitbox/display', 'none');
+        el.attr('settingsPath/display', 'none');
+      } catch(e) {}
+    }
 
     // ports (some blocks have dynamic number of inputs)
 function __portsFor(type, params) {
@@ -1600,6 +1701,18 @@ function updateDisplaysFromLastSim() {
     if (!el || el.isLink()) return;
     const type = el.get('blockType');
     const params = el.get('params') || {};
+    // Text block styling
+    if (type === 'Text') {
+      const txt = (params.text !== undefined) ? String(params.text) : 'Text';
+      const fs = Math.max(6, parseInt(params.fontSize ?? 16, 10) || 16);
+      const bold = !!params.bold;
+      const italic = !!params.italic;
+      el.attr('label/text', txt);
+      el.attr('label/fontSize', fs);
+      el.attr('label/fontWeight', bold ? 800 : 400);
+      el.attr('label/fontStyle', italic ? 'italic' : 'normal');
+      return;
+    }
     el.attr('label/text', blockText(type, String(id), params));
   }
 
@@ -1848,11 +1961,27 @@ refreshBlockText(nodeId);
     const node = graph.getCell(String(nodeId));
     if (!node) return;
     const type = node.get('blockType');
-    if (type === 'Plot') return; // Plot has its own double-click behavior
+    if (type === 'Plot') return; // Plot has its own double-click behavior (use Settings button)
     __pm.nodeId = String(nodeId);
     __pmBuildFormForNode(__pm.nodeId);
     __pmShow(true);
     // Focus first input if possible
+    setTimeout(() => {
+      try {
+        const { form } = __pmEls();
+        const first = form ? form.querySelector('input,textarea,select') : null;
+        if (first) first.focus();
+      } catch(e) {}
+    }, 0);
+  }
+
+  // Used for Plot: settings are NOT on double-click; they are opened via a dedicated Settings button.
+  function openParamModalForNodeAllowPlot(nodeId) {
+    const node = graph.getCell(String(nodeId));
+    if (!node) return;
+    __pm.nodeId = String(nodeId);
+    __pmBuildFormForNode(__pm.nodeId);
+    __pmShow(true);
     setTimeout(() => {
       try {
         const { form } = __pmEls();
@@ -1868,6 +1997,7 @@ refreshBlockText(nodeId);
     if (!n) { __pmShow(false); return; }
 
     const type = n.get('blockType');
+    const before = n.get('params') || {};
     let p = { ...(n.get('params') || {}), ...(__pm.draft || {}) };
     if (type === 'Sum') p = __normalizeSumParams(p);
     if (type === 'Plot') p = __normalizePlotParams(p);
@@ -1876,7 +2006,17 @@ refreshBlockText(nodeId);
 
     // If ports depend on params, rebuild ports
     try {
-      if (type === 'Sum' || type === 'Plot') __rebuildPortsForCell(n);
+      if (type === 'Sum') {
+        // Sum ports depend on n/signs; safe to rebuild always.
+        __rebuildPortsForCell(n);
+      }
+      if (type === 'Plot') {
+        // IMPORTANT: rebuilding ports on Plot will disconnect links.
+        // Only rebuild when the port count actually changes.
+        const bn = Math.max(1, parseInt((before && before.n) ?? 1, 10) || 1);
+        const an = Math.max(1, parseInt((p && p.n) ?? 1, 10) || 1);
+        if (bn !== an) __rebuildPortsForCell(n);
+      }
     } catch(e) {}
 
     refreshBlockText(String(n.id));
@@ -2064,7 +2204,79 @@ refreshBlockText(nodeId);
 
   // Click-to-select (single click selects exactly one block)
   paper.on('element:pointerdown', (elementView, evt) => {
-    // RMB + drag => copy block (Simulink-like)
+    // Click on the small ⚙ icon => open parameter modal (instead of double-click).
+    try {
+      const t = evt && evt.target;
+      const isSettings = !!(t && (t.closest ? t.closest('[data-action="settings"]') : (t.getAttribute && t.getAttribute('data-action') === 'settings')));
+      if (isSettings) {
+        try { evt.preventDefault(); evt.stopPropagation(); } catch(_) {}
+        const el = elementView && elementView.model;
+        if (el) {
+          const bt = el.get('blockType');
+          if (bt === 'Plot') openParamModalForNodeAllowPlot(String(el.id));
+          else openParamModalForNode(String(el.id));
+        }
+        return;
+      }
+    } catch(e) {}
+
+    // === Element resize (drag bottom-right corner) ===
+    // Works for all blocks. Drag inside a small handle area near bottom-right to resize.
+    // This is intentionally simple (Simulink-like) and avoids adding visible UI clutter.
+    if (!__isRmb(evt) && elementView && elementView.model) {
+      const el = elementView.model;
+
+      try {
+        const p = paper.clientToLocalPoint({ x: evt.clientX, y: evt.clientY });
+        const pos = el.position();
+        const sz = el.size();
+        const lx = p.x - pos.x;
+        const ly = p.y - pos.y;
+        const HANDLE = 12;
+
+        if (lx >= (sz.width - HANDLE) && ly >= (sz.height - HANDLE)) {
+          evt.preventDefault();
+          evt.stopPropagation();
+
+          const start = { x: p.x, y: p.y, w: sz.width, h: sz.height, id: String(el.id) };
+          window.__elemResize = start;
+
+          const onMove = (e) => {
+            if (!window.__elemResize) return;
+            const r = window.__elemResize;
+            const pp = paper.clientToLocalPoint({ x: e.clientX, y: e.clientY });
+            const dw = pp.x - r.x;
+            const dh = pp.y - r.y;
+
+            // Minimum sizes (keep blocks usable and ports visible)
+            const MIN_W = 40;
+            const MIN_H = 20;
+
+            const newW = Math.max(MIN_W, r.w + dw);
+            const newH = Math.max(MIN_H, r.h + dh);
+
+            const cell = graph.getCell(r.id);
+            if (cell) {
+              cell.resize(newW, newH);
+              try { updateLabelUpright(cell); } catch(_) {}
+              try { paper.findViewByModel(cell)?.update(); } catch(_) {}
+            }
+          };
+
+          const onUp = () => {
+            window.removeEventListener('mousemove', onMove, true);
+            window.removeEventListener('mouseup', onUp, true);
+            window.__elemResize = null;
+          };
+
+          window.addEventListener('mousemove', onMove, true);
+          window.addEventListener('mouseup', onUp, true);
+          return; // do not change selection when starting resize
+        }
+      } catch (e) {}
+    }
+
+// RMB + drag => copy block (Simulink-like)
     if (__isRmb(evt)) {
       try { evt.preventDefault(); evt.stopPropagation(); } catch(e) {}
       __startCopyDrag(elementView, evt);
@@ -2488,7 +2700,7 @@ refreshBlockText(nodeId);
   // blocks (exclude Plot + Display from simulation)
   elems.forEach(el => {
     const type = el.get('blockType');
-    if (type === 'Plot' || type === 'Display') return;
+    if (type === 'Plot' || type === 'Display' || type === 'Text') return;
     blocks.push({
       id: String(el.id),
       type,
@@ -2672,12 +2884,20 @@ function openPlotForPlotNode(plotNodeId) {
   const el = graph.getCell(String(plotNodeId));
   if (!el) return;
 
+  __currentPlotNodeId = String(plotNodeId);
+
   const p = el.get('params') || {};
   const label = (typeof p.label === 'string' && p.label.trim()) ? p.label.trim() : `Plot ${plotNodeId}`;
   const n = Math.max(1, parseInt(p.n ?? 1, 10) || 1);
 
   const titleEl = document.getElementById('plotTitle');
   if (titleEl) titleEl.textContent = label;
+
+  // Make sure the Settings button knows which Plot block is active.
+  try {
+    const btn = document.getElementById('plotSettingsBtn');
+    if (btn) btn.disabled = false;
+  } catch(e) {}
 
   // If we have no simulation yet OR the graph has changed since last simulation, re-run simulate first.
   const curSig = __graphSignature();
@@ -2733,8 +2953,22 @@ paper.on('element:pointerdblclick', (elementView) => {
     if (!el) return;
     const t = el.get('blockType');
     if (t === 'Plot') openPlotForPlotNode(String(el.id));
-    else openParamModalForNode(String(el.id));
+    // Non-Plot blocks: params are opened via the ⚙ icon (top-left).
   });
+
+// Plot window: open Settings for the currently shown Plot block
+setTimeout(() => {
+  try {
+    const btn = document.getElementById('plotSettingsBtn');
+    if (btn) {
+      btn.disabled = true;
+      btn.addEventListener('click', () => {
+        if (!__currentPlotNodeId) return;
+        openParamModalForNodeAllowPlot(__currentPlotNodeId);
+      });
+    }
+  } catch(e) {}
+}, 0);
 
 // ===== Multiple open schemes (tabs) =====
   const __schemes = []; // { name, state }
